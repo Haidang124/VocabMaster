@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {
+      width: 350px;
+      min-height: 400px;
+      margin: 0;
+      padding: 0;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #f5f5f5;
+    }
+    
+    .header {
+      display: flex;
+      align-items: center;
+      padding: 15px;
+      background: white;
+      border-bottom: 1px solid #e0e0e0;
+    }
+    
+    .icon {
+      width: 24px;
+      height: 24px;
+      margin-right: 10px;
+    }
+    
+    .title {
+      font-size: 18px;
+      font-weight: bold;
+      color: #333;
+    }
+    
+    .close-btn {
+      margin-left: auto;
+      background: none;
+      border: none;
+      font-size: 18px;
+      cursor: pointer;
+      color: #666;
+    }
+    
+    .tabs {
+      display: flex;
+      background: white;
+      border-bottom: 1px solid #e0e0e0;
+    }
+    
+    .tab {
+      flex: 1;
+      padding: 12px;
+      text-align: center;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.3s;
+    }
+    
+    .tab.active {
+      border-bottom-color: #4CAF50;
+      color: #4CAF50;
+      font-weight: bold;
+    }
+    
+    .tab-content {
+      display: none;
+      padding: 15px;
+    }
+    
+    .tab-content.active {
+      display: block;
+    }
+    
+    .color-picker {
+      display: flex;
+      align-items: center;
+      margin-bottom: 15px;
+    }
+    
+    .current-color {
+      width: 40px;
+      height: 40px;
+      border-radius: 4px;
+      margin-right: 15px;
+      border: 2px solid #ddd;
+      cursor: pointer;
+    }
+    
+    .color-options {
+      display: flex;
+      gap: 8px;
+    }
+    
+    .color-option {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      cursor: pointer;
+      border: 2px solid transparent;
+      transition: all 0.3s;
+    }
+    
+    .color-option:hover {
+      border-color: #333;
+    }
+    
+    .color-option.selected {
+      border-color: #333;
+      transform: scale(1.1);
+    }
+    
+    .controls {
+      margin-bottom: 15px;
+    }
+    
+    .toggle-btn {
+      width: 100%;
+      padding: 10px;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      margin-bottom: 10px;
+    }
+    
+    .toggle-btn:hover {
+      background: #45a049;
+    }
+    
+    .shortcut-info {
+      font-size: 12px;
+      color: #666;
+      text-align: center;
+    }
+    
+    .sheet-input {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      margin-bottom: 10px;
+      font-size: 14px;
+    }
+    
+    .sheet-btn {
+      width: 100%;
+      padding: 8px;
+      background: #2196F3;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    
+    .sheet-btn:hover {
+      background: #1976D2;
+    }
+    
+    .word-list {
+      max-height: 200px;
+      overflow-y: auto;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      background: white;
+    }
+    
+    .word-item {
+      padding: 8px 12px;
+      border-bottom: 1px solid #f0f0f0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .word-item:last-child {
+      border-bottom: none;
+    }
+    
+    .word-text {
+      font-weight: bold;
+      color: #333;
+    }
+    
+    .word-meaning {
+      font-size: 12px;
+      color: #666;
+      margin-top: 2px;
+    }
+    
+    .delete-btn {
+      background: #f44336;
+      color: white;
+      border: none;
+      border-radius: 3px;
+      padding: 4px 8px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    
+    .review-word {
+      text-align: center;
+      padding: 20px;
+      background: white;
+      border-radius: 8px;
+      margin-bottom: 15px;
+    }
+    
+    .review-word-text {
+      font-size: 24px;
+      font-weight: bold;
+      color: #333;
+      margin-bottom: 10px;
+    }
+    
+    .review-word-meaning {
+      font-size: 16px;
+      color: #666;
+      margin-bottom: 15px;
+    }
+    
+    .review-buttons {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+    }
+    
+    .review-btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    
+    .review-btn.knew {
+      background: #4CAF50;
+      color: white;
+    }
+    
+    .review-btn.didnt-know {
+      background: #f44336;
+      color: white;
+    }
+    
+    .stats {
+      text-align: center;
+      font-size: 12px;
+      color: #666;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="icon">🖍️</div>
+    <div class="title">VocabMaster</div>
+    <button class="close-btn" id="closeBtn">×</button>
+  </div>
+  
+  <div class="tabs">
+    <div class="tab active" data-tab="highlights">Quản Lý Từ</div>
+    <div class="tab" data-tab="review">Từ Ngẫu Nhiên</div>
+    <div class="tab" data-tab="settings">Cài Đặt</div>
+  </div>
+  
+  <!-- Highlights Tab -->
+  <div class="tab-content active" id="highlights">
+    <div class="word-list" id="wordList">
+      <!-- Words will be populated here -->
+    </div>
+    
+    <div style="margin-top: 10px;">
+      <button class="delete-btn" id="deleteAll" style="width: 48%; margin-right: 4%;">🗑️ Xóa Tất Cả</button>
+      <button class="delete-btn" id="copyAll" style="width: 48%; background: #2196F3;">📋 Sao Chép Tất Cả</button>
+    </div>
+  </div>
+  
+  <!-- Review Tab -->
+  <div class="tab-content" id="review">
+    <div style="margin-bottom: 15px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+        <h3 style="margin: 0; color: #333; font-size: 16px;">🎲 Ôn Tập Từ Vựng</h3>
+        <button id="rollWords" style="padding: 8px 16px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px;">🎲 Roll</button>
+      </div>
+      <div style="font-size: 12px; color: #666; margin-bottom: 15px; padding: 8px; background: #f8f9fa; border-radius: 4px;">
+        💡 Sử dụng phương pháp lặp lại ngắt quãng - từ đã học sẽ xuất hiện lại sau khoảng thời gian nhất định
+      </div>
+    </div>
+    
+    <div id="reviewWordsContainer">
+      <!-- Words will be populated here -->
+    </div>
+    
+    <div class="stats" id="reviewStats" style="margin-top: 15px;">
+      Tiến độ hôm nay: 0/0 từ đã ôn tập
+    </div>
+  </div>
+  
+  <!-- Settings Tab -->
+  <div class="tab-content" id="settings">
+    <div style="margin-bottom: 20px;">
+      <div style="font-size: 12px; color: #666; text-align: center; padding: 10px; background: #f8f9fa; border-radius: 4px;">
+        💡 <strong>Cách sử dụng:</strong><br>
+        1. Double-click từ → Nhấn phím tắt để highlight<br>
+        2. Hover chuột vào từ đã highlight → Chọn hành động
+      </div>
+    </div>
+    
+    <div style="margin-bottom: 20px;">
+      <h3 style="margin: 0 0 15px 0; color: #333; font-size: 16px;">⚙️ Cài Đặt Phím Tắt</h3>
+      <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Phím tắt highlight:</label>
+      <div style="display: flex; gap: 5px; align-items: center; margin-bottom: 10px;">
+        <select id="modifierKey" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px; flex: 1;">
+          <option value="alt">Alt</option>
+          <option value="ctrl">Ctrl</option>
+          <option value="shift">Shift</option>
+          <option value="meta">Cmd (Mac)</option>
+        </select>
+        <span style="color: #666; font-weight: bold;">+</span>
+        <input type="text" id="shortcutKey" placeholder="F" maxlength="1" style="width: 60px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; text-align: center;">
+        <button id="saveShortcut" style="padding: 8px 15px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Lưu</button>
+      </div>
+      <div id="shortcutStatus" style="font-size: 12px; color: #666; padding: 8px; background: #f8f9fa; border-radius: 4px;">
+        Hiện tại: Alt + F
+      </div>
+    </div>
+    
+    <div style="margin-bottom: 20px;">
+      <h3 style="margin: 0 0 15px 0; color: #333; font-size: 16px;">🎨 Cài Đặt Màu Sắc</h3>
+      <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Màu highlight mặc định:</label>
+      <div style="display: flex; align-items: center; margin-bottom: 10px;">
+        <div class="current-color" id="currentColor" style="background-color: #FFEB3B; width: 50px; height: 50px; border-radius: 8px; margin-right: 15px; border: 3px solid #ddd; cursor: pointer;"></div>
+        <div class="color-options" style="display: flex; gap: 10px;">
+          <div class="color-option selected" data-color="#FFEB3B" style="background-color: #FFEB3B; width: 30px; height: 30px; border-radius: 50%; cursor: pointer; border: 3px solid #333;"></div>
+          <div class="color-option" data-color="#4CAF50" style="background-color: #4CAF50; width: 30px; height: 30px; border-radius: 50%; cursor: pointer; border: 3px solid transparent;"></div>
+          <div class="color-option" data-color="#03DAC6" style="background-color: #03DAC6; width: 30px; height: 30px; border-radius: 50%; cursor: pointer; border: 3px solid transparent;"></div>
+          <div class="color-option" data-color="#E91E63" style="background-color: #E91E63; width: 30px; height: 30px; border-radius: 50%; cursor: pointer; border: 3px solid transparent;"></div>
+          <div class="color-option" data-color="#9C27B0" style="background-color: #9C27B0; width: 30px; height: 30px; border-radius: 50%; cursor: pointer; border: 3px solid transparent;"></div>
+        </div>
+      </div>
+    </div>
+    
+    <div style="margin-bottom: 20px;">
+      <h3 style="margin: 0 0 15px 0; color: #333; font-size: 16px;">📚 Cài Đặt Ôn Tập</h3>
+      <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Số từ hiển thị mỗi lần:</label>
+      <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
+        <input type="number" id="wordCount" min="1" max="20" value="5" style="width: 80px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; text-align: center;">
+        <span style="color: #666; font-size: 14px;">từ</span>
+        <button id="saveWordCount" style="padding: 8px 15px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Lưu</button>
+      </div>
+      <div style="font-size: 11px; color: #666; padding: 8px; background: #f8f9fa; border-radius: 4px;">
+        💡 Sử dụng phương pháp lặp lại ngắt quãng để tối ưu việc học từ vựng
+      </div>
+    </div>
+    
+    <div style="margin-bottom: 20px;">
+      <h3 style="margin: 0 0 15px 0; color: #333; font-size: 16px;">📊 Cài Đặt Google Sheets</h3>
+      <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Google Sheets URL:</label>
+      <input type="text" class="sheet-input" id="sheetUrl" placeholder="Nhập URL Google Sheets để lưu từ mới (tích hợp thủ công)">
+      <button class="sheet-btn" id="saveToSheet" style="margin-top: 10px;">Lưu URL Sheet</button>
+      <div style="font-size: 11px; color: #666; margin-top: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px;">
+        💡 Từ mới sẽ được log trong console để bạn có thể tích hợp thủ công với Google Sheets API
+      </div>
+    </div>
+    
+         <div style="margin-bottom: 20px;">
+           <h3 style="margin: 0 0 15px 0; color: #333; font-size: 16px;">💾 Backup & Restore</h3>
+           <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+             <button id="exportSettings" style="padding: 8px 15px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; flex: 1;">📤 Export Cài Đặt</button>
+             <button id="importSettings" style="padding: 8px 15px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; flex: 1;">📥 Import Cài Đặt</button>
+           </div>
+           <input type="file" id="settingsFile" accept=".json" style="display: none;">
+           <div style="font-size: 11px; color: #666; padding: 8px; background: #f8f9fa; border-radius: 4px;">
+             💡 Export cài đặt ra file JSON để backup hoặc chuyển sang máy khác
+           </div>
+         </div>
+         
+         <div style="margin-bottom: 20px;">
+           <h3 style="margin: 0 0 15px 0; color: #333; font-size: 16px;">ℹ️ Thông Tin</h3>
+           <div style="font-size: 12px; color: #666; padding: 10px; background: #f8f9fa; border-radius: 4px; line-height: 1.5;">
+             <strong>Cách sử dụng:</strong><br>
+             1. Double-click từ → Nhấn phím tắt để highlight<br>
+             2. Hover chuột vào từ đã highlight → Chọn hành động<br><br>
+             <strong>Phiên bản:</strong> 1.0<br>
+             <strong>Tác giả:</strong> VocabMaster
+           </div>
+    </div>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>

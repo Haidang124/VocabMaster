@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "VocabMaster",
+  "version": "1.0",
+  "description": "VocabMaster - Master English vocabulary with highlighting, review, and spaced repetition",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["content.css"]
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "VocabMaster"
+  },
+  "commands": {
+    "highlight-word": {
+      "suggested_key": {
+        "default": "Alt+H"
+      },
+      "description": "Highlight selected word"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

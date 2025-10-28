@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Demo - English Vocabulary Extension</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .instruction {
+            background: #e3f2fd;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            border-left: 4px solid #2196F3;
+        }
+        .instruction h3 {
+            margin-top: 0;
+            color: #1976D2;
+        }
+        .sample-text {
+            font-size: 18px;
+            line-height: 1.8;
+            color: #444;
+        }
+        .highlight-demo {
+            background: #fff3e0;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid #ff9800;
+        }
+        .word-list {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+        .word-list h4 {
+            margin-top: 0;
+            color: #495057;
+        }
+        .word-list ul {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+        .word-list li {
+            margin: 8px 0;
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🖍️ English Vocabulary Extension Demo</h1>
+        
+        <div class="instruction">
+            <h3>📋 Hướng dẫn sử dụng:</h3>
+            <ol>
+                <li><strong>Double-click</strong> vào từ bất kỳ trong đoạn văn bên dưới</li>
+                <li><strong>Nhấn Alt+H</strong> để highlight và lưu từ</li>
+                <li>Mở extension popup để xem danh sách từ đã lưu</li>
+                <li>Sử dụng tab "Từ Ngẫu Nhiên" để ôn tập</li>
+            </ol>
+        </div>
+
+        <div class="highlight-demo">
+            <h3>🎯 Thử highlight các từ này:</h3>
+            <div class="sample-text">
+                The <strong>magnificent</strong> mountain range stretched across the horizon, 
+                its <strong>peaks</strong> covered in <strong>pristine</strong> snow. 
+                The <strong>landscape</strong> was truly <strong>breathtaking</strong>, 
+                with <strong>crystal-clear</strong> streams flowing through 
+                <strong>lush</strong> valleys. This <strong>extraordinary</strong> 
+                <strong>wilderness</strong> provided a perfect <strong>sanctuary</strong> 
+                for <strong>wildlife</strong> and <strong>adventurers</strong> alike.
+            </div>
+        </div>
+
+        <div class="sample-text">
+            <h3>📖 Đoạn văn mẫu để thực hành:</h3>
+            <p>
+                Technology has <strong>revolutionized</strong> the way we communicate and 
+                <strong>interact</strong> with the world. The <strong>internet</strong> 
+                has made information <strong>accessible</strong> to billions of people, 
+                <strong>transforming</strong> education, business, and entertainment. 
+                <strong>Artificial intelligence</strong> is becoming increasingly 
+                <strong>sophisticated</strong>, offering new possibilities for 
+                <strong>automation</strong> and <strong>innovation</strong>.
+            </p>
+            
+            <p>
+                Climate change represents one of the most <strong>pressing</strong> 
+                challenges of our time. Rising temperatures, <strong>melting</strong> 
+                ice caps, and <strong>extreme</strong> weather events are 
+                <strong>evidence</strong> of this <strong>global</strong> crisis. 
+                <strong>Sustainable</strong> practices and <strong>renewable</strong> 
+                energy sources are <strong>essential</strong> for addressing these 
+                <strong>environmental</strong> concerns.
+            </p>
+        </div>
+
+        <div class="word-list">
+            <h4>💡 Gợi ý từ để highlight:</h4>
+            <ul>
+                <li>magnificent, pristine, breathtaking</li>
+                <li>revolutionized, sophisticated, innovation</li>
+                <li>pressing, sustainable, renewable</li>
+                <li>extraordinary, wilderness, sanctuary</li>
+                <li>accessible, transforming, artificial</li>
+            </ul>
+        </div>
+
+        <div class="instruction">
+            <h3>🔧 Cấu hình Google Sheets:</h3>
+            <p>
+                Để tự động lưu từ mới vào Google Sheets:
+            </p>
+            <ol>
+                <li>Tạo Google Sheets mới</li>
+                <li>Copy URL của sheet</li>
+                <li>Mở extension popup</li>
+                <li>Paste URL vào ô "Google Sheets URL"</li>
+                <li>Click "Lưu URL Sheet"</li>
+            </ol>
+        </div>
+    </div>
+</body>
+</html>
