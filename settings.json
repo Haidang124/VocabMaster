@@ -1,11 +1,13 @@
 {
   "shortcutSettings": {
     "modifier": "alt",
-    "key": "t"
+    "key": "H"
   },
   "highlightColor": "#FFEB3B",
   "wordCount": 5,
-  "sheetUrl": "",
+  "sheetUrl": "https://docs.google.com/spreadsheets/d/1esJJVzgowqyY8YXeps4fN3acToqpMuETkdP1JsJbQeI/edit?usp=sharing",
+  "sheetName": "Newword",
+  "selectedSheetId": "",
   "exportDate": "2024-01-15T10:30:00.000Z",
   "version": "1.0"
 }

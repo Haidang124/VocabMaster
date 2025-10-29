@@ -113,6 +113,29 @@ function highlightSelectedWord() {
     // Save word to storage
     saveWordToStorage(selectedWord);
     
+    // Log to Google Sheets
+    console.log('Sending logToSheets message for word:', selectedWord);
+    chrome.runtime.sendMessage({
+      action: 'logToSheets',
+      logData: {
+        action: 'add',
+        word: selectedWord,
+        timestamp: new Date().toLocaleString(),
+        url: window.location.href
+      }
+    }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.error('Error sending message to background:', chrome.runtime.lastError);
+      } else {
+        console.log('Response from background:', response);
+        
+        // Show notification if needed
+        if (response && response.showNotification) {
+          showNotification(response.notificationMessage, 'error');
+        }
+      }
+    });
+    
     // Clear selection
     window.getSelection().removeAllRanges();
     selectedWord = null;
@@ -281,31 +304,21 @@ function showActionMenu(x, y, text, spanElement) {
       parent.normalize();
       console.log('Highlight removed from DOM');
       
-      // Remove from storage
-      chrome.storage.local.get(['highlightedWords'], (result) => {
-        try {
-          const words = result.highlightedWords || [];
-          console.log('Current words:', words.map(w => w.word));
-          console.log('Deleting word:', text.toLowerCase());
-          
-          const filteredWords = words.filter(w => {
-            const wordMatch = w.word.toLowerCase() === text.toLowerCase();
-            console.log(`Comparing "${w.word}" with "${text}" -> ${wordMatch}`);
-            return !wordMatch;
-          });
-          
-          console.log('Filtered words:', filteredWords.map(w => w.word));
-          chrome.storage.local.set({highlightedWords: filteredWords}, () => {
-            // Notify popup to refresh word list
-            chrome.runtime.sendMessage({action: 'wordDeleted', word: text.toLowerCase()});
-          });
-        } catch (storageError) {
-          // Silent error handling
+      // Remove from storage and log to Google Sheets
+      console.log('Sending deleteWord message for word:', text.toLowerCase());
+      chrome.runtime.sendMessage({
+        action: 'deleteWord',
+        word: text.toLowerCase()
+      }, (response) => {
+        if (chrome.runtime.lastError) {
+          console.error('Error deleting word:', chrome.runtime.lastError);
+        } else {
+          console.log('Word deleted successfully:', response);
         }
       });
       
     } catch (error) {
-      // Silent error handling
+      console.error('Error in delete button click:', error);
     }
     tooltip.remove();
   });
@@ -410,6 +423,59 @@ function showColorPicker(x, y, text, spanElement) {
   }, { once: true });
 }
 
+
+// Show notification popup
+function showNotification(message, type = 'success') {
+  // Remove existing notification
+  const existingNotification = document.getElementById('vocab-notification');
+  if (existingNotification) {
+    existingNotification.remove();
+  }
+  
+  const notification = document.createElement('div');
+  notification.id = 'vocab-notification';
+  notification.style.cssText = `
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: ${type === 'error' ? '#f44336' : type === 'info' ? '#2196F3' : '#4CAF50'};
+    color: white;
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    z-index: 2147483647;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    max-width: 300px;
+    word-wrap: break-word;
+    animation: slideIn 0.3s ease-out;
+  `;
+  
+  // Add CSS animation
+  const style = document.createElement('style');
+  style.textContent = `
+    @keyframes slideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+  `;
+  document.head.appendChild(style);
+  
+  notification.textContent = message;
+  document.body.appendChild(notification);
+  
+  // Auto remove after 4 seconds
+  setTimeout(() => {
+    if (notification.parentNode) {
+      notification.style.animation = 'slideIn 0.3s ease-out reverse';
+      setTimeout(() => {
+        if (notification.parentNode) {
+          notification.remove();
+        }
+      }, 300);
+    }
+  }, 4000);
+}
 
 // Initialize - load settings without changing cursor
 chrome.storage.local.get(['highlightColor', 'shortcutSettings'], (result) => {

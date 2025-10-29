@@ -356,15 +356,38 @@
       </div>
     </div>
     
-    <div style="margin-bottom: 20px;">
-      <h3 style="margin: 0 0 15px 0; color: #333; font-size: 16px;">📊 Cài Đặt Google Sheets</h3>
-      <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Google Sheets URL:</label>
-      <input type="text" class="sheet-input" id="sheetUrl" placeholder="Nhập URL Google Sheets để lưu từ mới (tích hợp thủ công)">
-      <button class="sheet-btn" id="saveToSheet" style="margin-top: 10px;">Lưu URL Sheet</button>
-      <div style="font-size: 11px; color: #666; margin-top: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px;">
-        💡 Từ mới sẽ được log trong console để bạn có thể tích hợp thủ công với Google Sheets API
-      </div>
-    </div>
+         <div style="margin-bottom: 20px;">
+           <h3 style="margin: 0 0 15px 0; color: #333; font-size: 16px;">📊 Cài Đặt Google Sheets</h3>
+           
+           <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Google Sheet URL:</label>
+           <input type="text" class="sheet-input" id="sheetUrl" placeholder="Nhập URL Google Sheets" value="https://docs.google.com/spreadsheets/d/1esJJVzgowqyY8YXeps4fN3acToqpMuETkdP1JsJbQeI/edit?usp=sharing">
+           <small style="display: block; margin-top: 5px; color: #666; font-size: 12px;">
+             <strong>Chia sẻ sheet với:</strong> vocabmaster@vocabmaster-476607.iam.gserviceaccount.com<br>
+             <strong>Quyền:</strong> Editor
+           </small>
+           
+           <label style="display: block; margin: 15px 0 5px 0; font-weight: bold; color: #333;">Tải Danh Sách Trang Tính:</label>
+           <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
+             <button class="sheet-btn" id="fetchSheets" style="padding: 8px 15px; background: #FF9800; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; flex: 1;">🔍 Tải Danh Sách Trang Tính</button>
+           </div>
+           
+           <div id="sheetsDropdown" style="display: none; margin-bottom: 10px;">
+             <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Chọn Trang Tính:</label>
+             <select class="sheet-input" id="sheetSelect" style="margin-bottom: 10px;">
+               <option value="">-- Chọn trang tính --</option>
+             </select>
+           </div>
+           
+           <button class="sheet-btn" id="saveSheetsConfig" style="margin-top: 10px;">💾 Lưu Cấu Hình</button>
+           
+           <div style="font-size: 11px; color: #666; margin-top: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px;">
+             💡 <strong>Hướng dẫn:</strong><br>
+             1. Tạo Google Sheet mới<br>
+             2. Share sheet cho: <strong>vocabmaster@vocabmaster-476607.iam.gserviceaccount.com</strong><br>
+             3. Paste URL sheet vào ô trên<br>
+             4. Click "Tải Danh Sách Trang Tính" → chọn trang tính
+           </div>
+         </div>
     
          <div style="margin-bottom: 20px;">
            <h3 style="margin: 0 0 15px 0; color: #333; font-size: 16px;">💾 Backup & Restore</h3>
@@ -390,6 +413,7 @@
     </div>
   </div>
   
+  <script src="googleSheetsAPI.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

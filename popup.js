@@ -8,17 +8,21 @@ let currentReviewIndex = 0;
 document.addEventListener('DOMContentLoaded', () => {
   // Wait a bit to ensure all elements are loaded
   setTimeout(() => {
-    initializeTabs();
-    initializeColorPicker();
-    initializeControls();
-    initializeWordList();
-    initializeReview();
-    loadWords();
+  initializeTabs();
+  initializeColorPicker();
+  initializeControls();
+  initializeWordList();
+  initializeReview();
+  loadWords();
     
     // Listen for word deletion from content script
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (request.action === 'wordDeleted') {
         loadWords(); // Refresh word list
+      } else if (request.action === 'logToGoogleSheets') {
+        // Handle Google Sheets logging from background script
+        handleGoogleSheetsLogging(request, sendResponse);
+        return true; // Keep message channel open for async response
       }
     });
   }, 100);
@@ -76,8 +80,8 @@ function initializeColorPicker() {
       
       // Send color to content script
       sendMessageToContentScript({
-        action: 'setHighlightColor',
-        color: color
+            action: 'setHighlightColor',
+            color: color
       }, (response, error) => {
         if (error) {
           console.log('Content script not available for color update');
@@ -163,14 +167,22 @@ function initializeControls() {
   
   // Delete all button
   document.getElementById('deleteAll').addEventListener('click', () => {
-    if (confirm('Bạn có chắc muốn xóa tất cả từ đã highlight?')) {
-      chrome.runtime.sendMessage({action: 'deleteAllWords'}, (response) => {
-        if (response.success) {
-          loadWords();
-          showNotification('Đã xóa tất cả từ!');
-        }
-      });
-    }
+    // Get current tab URL
+    chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+      const currentUrl = tabs[0]?.url || 'Unknown';
+      
+      if (confirm(`Bạn có chắc muốn xóa tất cả từ đã highlight từ trang này?\n\nURL: ${currentUrl}`)) {
+        chrome.runtime.sendMessage({
+          action: 'deleteAllWords',
+          currentUrl: currentUrl
+        }, (response) => {
+          if (response.success) {
+            loadWords();
+            showNotification(`Đã xóa ${response.deletedCount} từ từ trang này! Còn lại ${response.remainingCount} từ từ các trang khác.`);
+          }
+        });
+      }
+    });
   });
   
   // Copy all button
@@ -181,19 +193,91 @@ function initializeControls() {
     });
   });
   
-        // Save to sheet button
-        const saveToSheetBtn = document.getElementById('saveToSheet');
-        if (saveToSheetBtn) {
-          saveToSheetBtn.addEventListener('click', () => {
-            const sheetUrl = document.getElementById('sheetUrl').value.trim();
-            if (sheetUrl) {
-              // Lưu URL vào storage
-              chrome.storage.local.set({sheetUrl: sheetUrl}, () => {
-                showNotification('Đã lưu URL Google Sheets! Từ mới sẽ được log trong console để tích hợp thủ công.');
-              });
-            } else {
-              showNotification('Vui lòng nhập URL Google Sheets', 'error');
+        
+        // Fetch sheets button
+        const fetchSheetsBtn = document.getElementById('fetchSheets');
+        if (fetchSheetsBtn) {
+          fetchSheetsBtn.addEventListener('click', async () => {
+    const sheetUrl = document.getElementById('sheetUrl').value.trim();
+            
+            if (!sheetUrl) {
+              showNotification('Vui lòng nhập URL Google Sheets trước', 'error');
+              return;
             }
+            
+            // Show loading
+            fetchSheetsBtn.textContent = '⏳ Đang tải...';
+            fetchSheetsBtn.disabled = true;
+            
+            try {
+              if (!googleSheetsAPI) {
+                showNotification('Google Sheets API chưa sẵn sàng, vui lòng thử lại sau', 'error');
+                return;
+              }
+              
+              console.log('Starting to fetch sheets...');
+              console.log('Google Sheets API instance:', googleSheetsAPI);
+              console.log('Fetching sheets for URL:', sheetUrl);
+              
+              const sheets = await googleSheetsAPI.fetchSheets(sheetUrl);
+              console.log('Fetched sheets successfully:', sheets);
+              
+              if (sheets.length > 0) {
+                // Populate dropdown
+                const sheetSelect = document.getElementById('sheetSelect');
+                sheetSelect.innerHTML = '<option value="">-- Chọn trang tính --</option>';
+                
+                sheets.forEach(sheet => {
+                  const option = document.createElement('option');
+                  option.value = sheet.name;
+                  option.textContent = sheet.name;
+                  sheetSelect.appendChild(option);
+                });
+                
+                // Show dropdown
+                document.getElementById('sheetsDropdown').style.display = 'block';
+                showNotification(`Tìm thấy ${sheets.length} trang tính!`);
+    } else {
+                showNotification('Không tìm thấy trang tính nào', 'error');
+              }
+            } catch (error) {
+              console.error('Error fetching sheets:', error);
+              console.error('Error stack:', error.stack);
+              showNotification('Lỗi khi tải trang tính: ' + error.message, 'error');
+            } finally {
+              fetchSheetsBtn.textContent = '🔍 Tải Danh Sách Trang Tính';
+              fetchSheetsBtn.disabled = false;
+            }
+          });
+        }
+        
+        // Save sheets config button
+        const saveSheetsConfigBtn = document.getElementById('saveSheetsConfig');
+        if (saveSheetsConfigBtn) {
+          saveSheetsConfigBtn.addEventListener('click', () => {
+            const sheetUrl = document.getElementById('sheetUrl').value.trim();
+            const selectedSheetName = document.getElementById('sheetSelect').value;
+            
+            if (!sheetUrl || !selectedSheetName) {
+              showNotification('Vui lòng điền đầy đủ thông tin', 'error');
+              return;
+            }
+            
+            // Extract sheet ID from URL
+            const sheetId = extractSheetId(sheetUrl);
+            if (!sheetId) {
+              showNotification('URL Google Sheets không hợp lệ', 'error');
+              return;
+            }
+            
+            // Lưu cấu hình vào storage
+            chrome.storage.local.set({
+              sheetUrl: sheetUrl,
+              sheetName: selectedSheetName,
+              selectedSheetId: sheetId
+            }, () => {
+              showNotification('Đã lưu cấu hình Google Sheets!');
+            });
           });
         }
         
@@ -374,6 +458,9 @@ function displayReviewWords(words) {
         word: word,
         knew: isKnew
       });
+      
+      // Log to Google Sheets
+      logToGoogleSheets('review', word, {knew: isKnew});
       
       // Remove the word from display
       e.target.closest('div[style*="background: white"]').remove();
@@ -673,13 +760,17 @@ function exportSettingsToFile() {
     'shortcutSettings', 
     'highlightColor', 
     'wordCount', 
-    'sheetUrl'
+    'sheetUrl',
+    'sheetName',
+    'selectedSheetId'
   ], (result) => {
     const settings = {
       shortcutSettings: result.shortcutSettings || {modifier: 'alt', key: 'h'},
       highlightColor: result.highlightColor || '#FFEB3B',
       wordCount: result.wordCount || 5,
-      sheetUrl: result.sheetUrl || '',
+      sheetUrl: result.sheetUrl || 'https://docs.google.com/spreadsheets/d/1LTnXrNzm-MM6a5ElqhwUqNa70wsOVNJI2Wr7zGwZwb0/edit',
+      sheetName: result.sheetName || '',
+      selectedSheetId: result.selectedSheetId || '',
       exportDate: new Date().toISOString(),
       version: '1.0'
     };
@@ -712,7 +803,9 @@ function importSettingsFromFile(file) {
           shortcutSettings: settings.shortcutSettings,
           highlightColor: settings.highlightColor,
           wordCount: settings.wordCount,
-          sheetUrl: settings.sheetUrl || ''
+          sheetUrl: settings.sheetUrl || 'https://docs.google.com/spreadsheets/d/1LTnXrNzm-MM6a5ElqhwUqNa70wsOVNJI2Wr7zGwZwb0/edit',
+          sheetName: settings.sheetName || '',
+          selectedSheetId: settings.selectedSheetId || ''
         }, () => {
           // Reload settings in UI
           loadSettings();
@@ -738,7 +831,9 @@ function loadDefaultSettings() {
         shortcutSettings: fileSettings.shortcutSettings,
         highlightColor: fileSettings.highlightColor,
         wordCount: fileSettings.wordCount,
-        sheetUrl: fileSettings.sheetUrl || ''
+        sheetUrl: fileSettings.sheetUrl || 'https://docs.google.com/spreadsheets/d/1LTnXrNzm-MM6a5ElqhwUqNa70wsOVNJI2Wr7zGwZwb0/edit',
+        sheetName: fileSettings.sheetName || '',
+        selectedSheetId: fileSettings.selectedSheetId || ''
       }, () => {
         // Settings loaded from file - send to content script
         sendMessageToContentScript({
@@ -753,14 +848,67 @@ function loadDefaultSettings() {
         shortcutSettings: {modifier: 'alt', key: 'h'},
         highlightColor: '#FFEB3B',
         wordCount: 5,
-        sheetUrl: ''
+        sheetUrl: 'https://docs.google.com/spreadsheets/d/1LTnXrNzm-MM6a5ElqhwUqNa70wsOVNJI2Wr7zGwZwb0/edit',
+        sheetName: '',
+        selectedSheetId: ''
       });
     });
 }
 
+// Initialize Google Sheets API
+let googleSheetsAPI = null;
+
+// Initialize immediately
+function initializeGoogleSheetsAPI() {
+  try {
+    console.log('Initializing Google Sheets API...');
+    googleSheetsAPI = new GoogleSheetsAPI();
+    console.log('Google Sheets API initialized successfully');
+  } catch (error) {
+    console.error('Error initializing Google Sheets API:', error);
+  }
+}
+
+// Start initialization when page loads
+document.addEventListener('DOMContentLoaded', () => {
+  console.log('DOM loaded, initializing Google Sheets API...');
+  initializeGoogleSheetsAPI();
+});
+
+// Log action to Google Sheets
+async function logToGoogleSheets(action, word, details = {}) {
+  if (!googleSheetsAPI) {
+    console.log('Google Sheets API not ready yet, skipping log');
+    return;
+  }
+  
+  chrome.storage.local.get(['sheetUrl', 'sheetName'], async (result) => {
+    if (!result.sheetUrl || !result.sheetName) {
+      console.log('No sheet URL or name configured, skipping log');
+      return;
+    }
+    
+    try {
+      console.log('Logging action to Google Sheets:', {action, word, details, sheetUrl: result.sheetUrl, sheetName: result.sheetName});
+      await googleSheetsAPI.logAction(result.sheetUrl, result.sheetName, action, word, details);
+      console.log('Successfully logged to Google Sheets:', {action, word, details});
+    } catch (error) {
+      console.error('Error logging to Google Sheets:', error);
+      console.error('Error stack:', error.stack);
+      // Don't show error to user for logging failures
+    }
+  });
+}
+
+// Extract Google Sheet ID from URL
+function extractSheetId(url) {
+  const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  return match ? match[1] : null;
+}
+
 // Load settings into UI
 function loadSettings() {
-  chrome.storage.local.get(['shortcutSettings', 'highlightColor', 'wordCount', 'sheetUrl'], (result) => {
+  chrome.storage.local.get(['shortcutSettings', 'highlightColor', 'wordCount', 'sheetUrl', 'sheetName'], (result) => {
     // Load shortcut settings
     const settings = result.shortcutSettings || {modifier: 'alt', key: 'h'};
     document.getElementById('modifierKey').value = settings.modifier;
@@ -788,7 +936,55 @@ function loadSettings() {
     document.getElementById('wordCount').value = count;
     
     // Load sheet URL
-    const sheetUrl = result.sheetUrl || '';
+    const sheetUrl = result.sheetUrl || 'https://docs.google.com/spreadsheets/d/1esJJVzgowqyY8YXeps4fN3acToqpMuETkdP1JsJbQeI/edit?usp=sharing';
     document.getElementById('sheetUrl').value = sheetUrl;
+    
+    // Load sheet name and show dropdown if configured
+    const sheetName = result.sheetName || '';
+    if (sheetName) {
+      document.getElementById('sheetSelect').value = sheetName;
+      document.getElementById('sheetsDropdown').style.display = 'block';
+    }
   });
+}
+
+// Handle Google Sheets logging from background script
+async function handleGoogleSheetsLogging(request, sendResponse) {
+  try {
+    console.log('Popup handling Google Sheets logging:', request);
+    
+    if (!googleSheetsAPI) {
+      console.log('GoogleSheetsAPI not initialized, initializing now...');
+      initializeGoogleSheetsAPI();
+    }
+    
+    if (!googleSheetsAPI) {
+      throw new Error('Failed to initialize GoogleSheetsAPI');
+    }
+    
+    console.log('Calling logAction with:', {
+      sheetUrl: request.sheetUrl,
+      sheetName: request.sheetName,
+      action: request.logData.action,
+      word: request.logData.word
+    });
+    
+    await googleSheetsAPI.logAction(
+      request.sheetUrl,
+      request.sheetName,
+      request.logData.action,
+      request.logData.word,
+      {
+        timestamp: request.logData.timestamp,
+        url: request.logData.url
+      }
+    );
+    
+    console.log('Successfully logged to Google Sheets from popup:', request.logData);
+    sendResponse({success: true});
+  } catch (error) {
+    console.error('Error logging to Google Sheets from popup:', error);
+    console.error('Error stack:', error.stack);
+    sendResponse({success: false, error: error.message});
+  }
 }

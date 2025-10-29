@@ -25,5 +25,7 @@
   },
   "homepage": "https://github.com/your-username/vocabmaster#readme",
   "devDependencies": {},
-  "dependencies": {}
+  "dependencies": {
+    "googleapis": "^128.0.0"
+  }
 }
