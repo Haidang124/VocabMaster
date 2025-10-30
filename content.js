@@ -75,46 +75,77 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-function highlightSelectedWord() {
-  if (!selectedWord || !selectedRange) {
-    return;
+function getDomPath(node) {
+  let path = [];
+  while (node && node !== document.body) {
+    let index = 0;
+    let sibling = node;
+    while ((sibling = sibling.previousSibling) != null) {
+      if (sibling.nodeType === node.nodeType && sibling.nodeName === node.nodeName) index++;
+    }
+    path.unshift(node.nodeName.toLowerCase() + ':' + index);
+    node = node.parentNode;
   }
-  
+  return path.join('/') || null;
+}
+
+function getNodeByDomPath(path) {
+  if (!path) return null;
+  let segments = path.split('/');
+  let node = document.body;
+  for (let seg of segments) {
+    let [tag, idx] = seg.split(':');
+    idx = Number(idx);
+    let matches = [];
+    for (let i = 0; i < node.childNodes.length; i++) {
+      let c = node.childNodes[i];
+      if (c.nodeName.toLowerCase() === tag) matches.push(c);
+    }
+    node = matches[idx];
+    if (!node) return null;
+  }
+  return node;
+}
+
+function highlightSelectedWord() {
+  if (!selectedWord || !selectedRange) return;
   try {
-    // Create highlight span
+    // Đoạn lấy domPath + offset
+    let anchorNode = selectedRange.startContainer;
+    let domPath = null;
+    let startOffset = selectedRange.startOffset;
+    let endOffset = selectedRange.endOffset;
+    if (anchorNode.nodeType === 3) { // TEXT_NODE
+      domPath = getDomPath(anchorNode);
+    } else if (anchorNode.childNodes.length > 0) {
+      // Nếu là element node, thử lấy con đầu tiên có text
+      let txt = Array.from(anchorNode.childNodes).find(x => x.nodeType === 3);
+      if (txt) domPath = getDomPath(txt);
+    }
+
+    // Tạo highlight bình thường
     const span = document.createElement('span');
     span.style.backgroundColor = highlightColor;
     span.style.padding = '2px 4px';
     span.style.borderRadius = '3px';
-    span.style.fontWeight = 'normal'; // Không làm đậm chữ
+    span.style.fontWeight = 'normal';
     span.className = 'vocabulary-highlight';
     span.setAttribute('data-word', selectedWord);
     span.setAttribute('data-timestamp', Date.now());
-    
-    // Clone the range to avoid issues
     const range = selectedRange.cloneRange();
-    
-    // Try to surround contents first
-    try {
-      range.surroundContents(span);
-    } catch (surroundError) {
-      // If surroundContents fails (multiple elements), use extractContents
+    try { range.surroundContents(span); } catch (e) {
       const contents = range.extractContents();
       span.appendChild(contents);
       range.insertNode(span);
     }
-    
-    // Add hover event để hiện popup action
     span.addEventListener('mouseenter', (e) => {
       const wordText = span.getAttribute('data-word') || span.textContent.trim().toLowerCase();
       showActionMenu(e.pageX, e.pageY, wordText, span);
     });
-    
-    // Save word to storage
-    saveWordToStorage(selectedWord);
-    
-    // Log to Google Sheets
-    console.log('Sending logToSheets message for word:', selectedWord);
+
+    saveWordToStorage(selectedWord, domPath, startOffset, endOffset);
+
+    // Gửi về background để log lên Google Sheet
     chrome.runtime.sendMessage({
       action: 'logToSheets',
       logData: {
@@ -128,65 +159,36 @@ function highlightSelectedWord() {
         console.error('Error sending message to background:', chrome.runtime.lastError);
       } else {
         console.log('Response from background:', response);
-        
-        // Show notification if needed
-        if (response && response.showNotification) {
-          showNotification(response.notificationMessage, 'error');
-        }
       }
     });
-    
-    // Clear selection
+    // Google Sheets ... giữ code cũ
     window.getSelection().removeAllRanges();
-    selectedWord = null;
-    selectedRange = null;
-  } catch (error) {
-    // Silent error handling
-  }
+    selectedWord = null; selectedRange = null;
+  } catch {}
 }
 
-function saveWordToStorage(word) {
+function saveWordToStorage(word, domPath, startOffset, endOffset) {
   try {
     chrome.storage.local.get(['highlightedWords'], (result) => {
-      if (chrome.runtime.lastError) {
-        return;
-      }
-      
+      if (chrome.runtime.lastError) return;
       try {
         const words = result.highlightedWords || [];
-        
-        // Check if word already exists
-        const existingWord = words.find(w => w.word === word);
-        if (existingWord) {
-          existingWord.count += 1;
-          existingWord.lastHighlighted = Date.now();
-        } else {
+        // Nếu đã có cùng word + domPath + startOffset thì không lưu trùng
+        const exists = words.find(w => w.word === word && w.domPath === domPath && w.startOffset === startOffset);
+        if (!exists) {
           const newWord = {
-            word: word,
-            meaning: '', // Will be filled later
-            count: 1,
-            firstHighlighted: Date.now(),
-            lastHighlighted: Date.now(),
-            color: highlightColor,
-            url: window.location.href,
-            title: document.title
+            word, meaning: '', count: 1,
+            firstHighlighted: Date.now(), lastHighlighted: Date.now(),
+            color: highlightColor, url: window.location.href,
+            title: document.title,
+            domPath, startOffset, endOffset
           };
-          
           words.push(newWord);
         }
-        
-        chrome.storage.local.set({highlightedWords: words}, () => {
-          if (chrome.runtime.lastError) {
-            // Silent error handling
-          }
-        });
-      } catch (callbackError) {
-        // Silent error handling
-      }
+        chrome.storage.local.set({highlightedWords: words});
+      } catch {}
     });
-  } catch (error) {
-    // Silent error handling
-  }
+  } catch {}
 }
 
 function showActionMenu(x, y, text, spanElement) {
@@ -477,6 +479,69 @@ function showNotification(message, type = 'success') {
     }
   }, 4000);
 }
+
+// ====== TỰ ĐỘNG HIỂN THỊ HIGHLIGHT KHI LOAD LẠI TRANG ======
+function autoHighlightSavedWords() {
+  chrome.storage.local.get(['highlightedWords'], (result) => {
+    const words = (result.highlightedWords || []).filter(w => w.url === window.location.href);
+    for (let obj of words) {
+      if (!obj.domPath || obj.startOffset == null || obj.endOffset == null) continue;
+      const node = getNodeByDomPath(obj.domPath);
+      if (node && node.nodeType === 3) { // TEXT_NODE
+        try {
+          const range = document.createRange();
+          range.setStart(node, obj.startOffset);
+          range.setEnd(node, obj.endOffset);
+          const span = document.createElement('span');
+          span.className = 'vocabulary-highlight';
+          span.style.backgroundColor = obj.color || '#FFEB3B';
+          span.textContent = range.toString();
+          range.deleteContents();
+          range.insertNode(span);
+        } catch (e) {}
+      }
+    }
+  });
+}
+
+function highlightWordOnPage(word, color) {
+  if (!word) return;
+  const walker = document.createTreeWalker(
+    document.body,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode: function(node) {
+        if (!node.parentNode) return NodeFilter.FILTER_REJECT;
+        const tag = node.parentNode.tagName;
+        if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'INPUT' || tag === 'TEXTAREA') return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    },
+    false
+  );
+  const regex = new RegExp(`\\b${word}\\b`, 'gi');
+  let node;
+  while (node = walker.nextNode()) {
+    if (regex.test(node.nodeValue)) {
+      const span = document.createElement('span');
+      span.className = 'vocabulary-highlight';
+      span.style.backgroundColor = color;
+      span.textContent = word;
+      const parts = node.nodeValue.split(regex);
+      if (parts.length > 1) {
+        const before = document.createTextNode(parts[0]);
+        const after = document.createTextNode(parts.slice(1).join(word));
+        const fragment = document.createDocumentFragment();
+        fragment.appendChild(before);
+        fragment.appendChild(span.cloneNode(true));
+        if (after.textContent) fragment.appendChild(after);
+        node.parentNode.replaceChild(fragment, node);
+      }
+    }
+  }
+}
+
+window.addEventListener('load', () => setTimeout(autoHighlightSavedWords, 800));
 
 // Initialize - load settings without changing cursor
 chrome.storage.local.get(['highlightColor', 'shortcutSettings'], (result) => {
