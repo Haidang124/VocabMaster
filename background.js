@@ -79,7 +79,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       const words = result.highlightedWords || [];
       console.log('Current words before deletion:', words.map(w => w.word));
       
-      const filteredWords = words.filter(w => w.word !== request.word);
+      const filteredWords = words.filter(w => !(w.word === request.word && w.url === request.url));
       console.log('Words after filtering:', filteredWords.map(w => w.word));
       
       chrome.storage.local.set({highlightedWords: filteredWords}, () => {
@@ -89,13 +89,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       
       // Also delete from Google Sheets if configured
       if (result.sheetUrl && result.sheetName) {
-        console.log('Deleting word from Google Sheets:', request.word);
+        console.log('Deleting word from Google Sheets:', request.word, 'at url:', request.url);
         try {
           await logToGoogleSheetsDirectly(result.sheetUrl, result.sheetName, {
             action: 'delete',
             word: request.word,
-            timestamp: new Date().toLocaleString(),
-            url: 'Extension'
+            url: request.url,
+            timestamp: new Date().toLocaleString()
           });
           console.log('Successfully deleted word from Google Sheets');
         } catch (error) {
@@ -296,13 +296,9 @@ async function logToGoogleSheetsDirectly(sheetUrl, sheetName, logData) {
     
     // Handle different actions
     if (logData.action === 'delete') {
-      // Delete specific word from sheet
-      await deleteWordFromSheet(sheetId, encodedSheetName, accessToken, logData.word);
-      console.log('Successfully deleted word from Google Sheets');
+      await deleteWordFromSheet(sheetId, encodedSheetName, accessToken, logData.word, logData.url);
     } else if (logData.action === 'delete_all') {
-      // Delete all words from specific URL
       await deleteWordsFromUrl(sheetId, encodedSheetName, accessToken, logData.url);
-      console.log('Successfully deleted words from URL in Google Sheets');
     } else {
       // Add new word to sheet
       const values = [
@@ -335,73 +331,71 @@ async function logToGoogleSheetsDirectly(sheetUrl, sheetName, logData) {
   }
 }
 
-// Delete specific word from Google Sheet
-async function deleteWordFromSheet(sheetId, encodedSheetName, accessToken, wordToDelete) {
+async function getSheetIdByName(spreadsheetId, sheetName, accessToken) {
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties`, {
+    headers: { 'Authorization': `Bearer ${accessToken}` }
+  });
+  const data = await res.json();
+  const sheet = data.sheets.find(s => s.properties.title === sheetName);
+  return sheet ? sheet.properties.sheetId : null;
+}
+
+async function deleteWordFromSheet(spreadsheetId, sheetName, accessToken, wordToDelete, urlToDelete) {
   try {
-    // First, get all data from the sheet
-    const readResponse = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodedSheetName}!A:G`, {
+    const sheetId = await getSheetIdByName(spreadsheetId, sheetName, accessToken);
+    if (sheetId == null) throw new Error('Không tìm thấy sheetId cho sheetName: ' + sheetName);
+    const encodedSheetName = encodeURIComponent(sheetName);
+    const readResponse = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodedSheetName}!A:G`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json'
       }
     });
-    
-    if (!readResponse.ok) {
-      throw new Error('Failed to read sheet data');
-    }
-    
+    if (!readResponse.ok) throw new Error('Failed to read sheet data');
     const readData = await readResponse.json();
     const rows = readData.values || [];
-    
-    // Find rows to delete (matching the word)
-    const rowsToDelete = [];
-    for (let i = 0; i < rows.length; i++) {
-      if (rows[i][0] && rows[i][0].toLowerCase() === wordToDelete.toLowerCase()) {
-        rowsToDelete.push(i);
-      }
+    const startIdx = (rows.length > 0 && rows[0][0] && (rows[0][0].toLowerCase().trim() === 'từ' || rows[0][0].toLowerCase().trim() === 'new word' || rows[0][0].toLowerCase().trim() === 'word')) ? 1 : 0;
+    let rowsToDelete = [];
+    const cmpWord = wordToDelete.toLowerCase().trim();
+    const cmpUrl = urlToDelete.trim();
+    for (let i = startIdx; i < rows.length; i++) {
+      const sheetWord = rows[i][0] ? rows[i][0].toLowerCase().trim() : '';
+      const sheetUrl = rows[i][5] ? rows[i][5].trim() : '';
+      if (sheetWord === cmpWord && sheetUrl === cmpUrl) rowsToDelete.push(i);
     }
-    
     if (rowsToDelete.length === 0) {
-      console.log(`Word "${wordToDelete}" not found in sheet`);
+      console.log(`[DEBUG] Không tìm thấy dòng nào khớp để xóa cho từ \"${wordToDelete}\" và url \"${urlToDelete}\".`);
       return;
     }
-    
-    // Delete rows from bottom to top to maintain correct indices
-    for (let i = rowsToDelete.length - 1; i >= 0; i--) {
-      const rowIndex = rowsToDelete[i];
-      
-      const deleteRequest = {
-        requests: [{
-          deleteDimension: {
-            range: {
-              sheetId: 0, // Assuming first sheet
-              dimension: 'ROWS',
-              startIndex: rowIndex,
-              endIndex: rowIndex + 1
-            }
+    rowsToDelete.sort((a, b) => b - a);
+    const batchDeleteRequest = {
+      requests: rowsToDelete.map(rowIndex => ({
+        deleteDimension: {
+          range: {
+            sheetId,
+            dimension: 'ROWS',
+            startIndex: rowIndex,
+            endIndex: rowIndex + 1
           }
-        }]
-      };
-      
-      const deleteResponse = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}:batchUpdate`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(deleteRequest)
-      });
-      
-      if (!deleteResponse.ok) {
-        const errorData = await deleteResponse.json();
-        throw new Error(`Failed to delete row: ${errorData.error?.message || 'Unknown error'}`);
-      }
+        }
+      }))
+    };
+    const deleteResponse = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(batchDeleteRequest)
+    });
+    if (!deleteResponse.ok) {
+      const errorData = await deleteResponse.json();
+      throw new Error(`Failed to delete row(s): ${errorData.error?.message || 'Unknown error'}`);
     }
-    
-    console.log(`Successfully deleted ${rowsToDelete.length} row(s) for word "${wordToDelete}"`);
+    console.log(`[DEBUG] Đã xóa thành công ${rowsToDelete.length} dòng cho từ \"${wordToDelete}\" tại url \"${urlToDelete}\".`);
   } catch (error) {
-    console.error('Error deleting word from sheet:', error);
+    console.error('[DEBUG] Lỗi khi xoá từ khỏi sheet:', error);
     throw error;
   }
 }
@@ -446,7 +440,7 @@ async function deleteWordsFromUrl(sheetId, encodedSheetName, accessToken, urlToD
         requests: [{
           deleteDimension: {
             range: {
-              sheetId: 0, // Assuming first sheet
+              sheetId, 
               dimension: 'ROWS',
               startIndex: rowIndex,
               endIndex: rowIndex + 1

@@ -308,7 +308,8 @@ function showActionMenu(x, y, text, spanElement) {
       console.log('Sending deleteWord message for word:', text.toLowerCase());
       chrome.runtime.sendMessage({
         action: 'deleteWord',
-        word: text.toLowerCase()
+        word: text.toLowerCase(),
+        url: window.location.href
       }, (response) => {
         if (chrome.runtime.lastError) {
           console.error('Error deleting word:', chrome.runtime.lastError);
