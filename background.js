@@ -1,7 +1,6 @@
 // Background script for handling keyboard shortcuts and storage
 chrome.commands.onCommand.addListener((command) => {
   if (command === 'highlight-word') {
-    // Send message to active tab
     chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
       if (tabs[0]) {
         chrome.tabs.sendMessage(tabs[0].id, {action: 'highlightWord'});
@@ -10,16 +9,14 @@ chrome.commands.onCommand.addListener((command) => {
   }
 });
 
-// Handle extension installation
 chrome.runtime.onInstalled.addListener(() => {
-        // Initialize default settings
         chrome.storage.local.set({
           highlightedWords: [],
-          highlightMode: false, // Mặc định tắt highlight mode
+          highlightMode: false,
           highlightColor: '#FFEB3B',
-          sheetUrl: 'https://docs.google.com/spreadsheets/d/1esJJVzgowqyY8YXeps4fN3acToqpMuETkdP1JsJbQeI/edit?usp=sharing', // Default Google Sheets URL
-          sheetName: 'Newword', // Default sheet name
-          shortcutSettings: {modifier: 'alt', key: 'h'}, // Default shortcut Alt+H
+          sheetUrl: 'https://docs.google.com/spreadsheets/d/1esJJVzgowqyY8YXeps4fN3acToqpMuETkdP1JsJbQeI/edit?usp=sharing',
+          sheetName: 'Newword',
+          shortcutSettings: {modifier: 'alt', key: 'h'},
           reviewStats: {
             totalReviewed: 0,
             lastReviewDate: null,
@@ -29,13 +26,12 @@ chrome.runtime.onInstalled.addListener(() => {
         
 });
 
-// Handle messages from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'getHighlightedWords') {
     chrome.storage.local.get(['highlightedWords'], (result) => {
       sendResponse({words: result.highlightedWords || []});
     });
-    return true; // Keep message channel open for async response
+    return true;
   }
   
   if (request.action === 'deleteAllWords') {
@@ -43,7 +39,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       const words = result.highlightedWords || [];
       const currentUrl = request.currentUrl || 'Unknown';
       
-      // Filter words to only delete those from current URL
       const wordsFromCurrentUrl = words.filter(w => w.url === currentUrl);
       const remainingWords = words.filter(w => w.url !== currentUrl);
       
@@ -55,7 +50,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
       });
       
-      // Also log deletion of words from current URL to Google Sheets if configured
       if (result.sheetUrl && result.sheetName && wordsFromCurrentUrl.length > 0) {
         try {
           await logToGoogleSheetsDirectly(result.sheetUrl, result.sheetName, {
@@ -64,7 +58,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             timestamp: new Date().toLocaleString(),
             url: currentUrl
           });
-          console.log('Successfully logged delete all words from current URL to Google Sheets');
         } catch (error) {
           console.error('Error logging delete all words from current URL to Google Sheets:', error);
         }
@@ -74,22 +67,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
   
   if (request.action === 'deleteWord') {
-    console.log('Received deleteWord request for word:', request.word);
     chrome.storage.local.get(['highlightedWords', 'sheetUrl', 'sheetName'], async (result) => {
       const words = result.highlightedWords || [];
-      console.log('Current words before deletion:', words.map(w => w.word));
-      
       const filteredWords = words.filter(w => !(w.word === request.word && w.url === request.url));
-      console.log('Words after filtering:', filteredWords.map(w => w.word));
       
       chrome.storage.local.set({highlightedWords: filteredWords}, () => {
-        console.log('Updated storage with filtered words');
         sendResponse({success: true});
       });
       
-      // Also delete from Google Sheets if configured
       if (result.sheetUrl && result.sheetName) {
-        console.log('Deleting word from Google Sheets:', request.word, 'at url:', request.url);
         try {
           await logToGoogleSheetsDirectly(result.sheetUrl, result.sheetName, {
             action: 'delete',
@@ -97,74 +83,74 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             url: request.url,
             timestamp: new Date().toLocaleString()
           });
-          console.log('Successfully deleted word from Google Sheets');
         } catch (error) {
           console.error('Error deleting word from Google Sheets:', error);
         }
-      } else {
-        console.log('Google Sheets not configured, skipping deletion');
       }
     });
     return true;
   }
   
         if (request.action === 'getRandomWords') {
-          chrome.storage.local.get(['highlightedWords'], (result) => {
-            const words = result.highlightedWords || [];
-            const count = request.count || 5;
-            const randomWords = getRandomWordsForReview(words, count);
-            sendResponse({words: randomWords});
-          });
+          (async () => {
+            const wordsFromSheet = await loadWordsFromSheet();
+            chrome.storage.local.get(['highlightedWords'], (result) => {
+              const words = [...(result.highlightedWords || []), ...wordsFromSheet];
+              const count = request.count || 5;
+              const randomWords = getRandomWordsForReview(words, count);
+              sendResponse({words: randomWords});
+            });
+          })();
+          return true;
+        }
+        
+        if (request.action === 'loadWordsFromSheet') {
+          (async () => {
+            const words = await loadWordsFromSheet();
+            sendResponse({words: words});
+          })();
           return true;
         }
   
   if (request.action === 'updateReviewStats') {
     chrome.storage.local.get(['reviewStats'], (result) => {
-      const stats = result.reviewStats || {totalReviewed: 0, lastReviewDate: null, todayReviewed: 0};
-      const today = new Date().toDateString();
+      const stats = result.reviewStats || {
+        totalReviewed: 0,
+        lastReviewDate: null,
+        todayReviewed: 0
+      };
       
-      if (stats.lastReviewDate !== today) {
+      const today = new Date().toDateString();
+      const lastDate = stats.lastReviewDate ? new Date(stats.lastReviewDate).toDateString() : null;
+      
+      if (lastDate !== today) {
         stats.todayReviewed = 0;
-        stats.lastReviewDate = today;
       }
       
-      stats.todayReviewed += 1;
       stats.totalReviewed += 1;
+      stats.todayReviewed += 1;
+      stats.lastReviewDate = new Date().toISOString();
       
       chrome.storage.local.set({reviewStats: stats}, () => {
-        sendResponse({success: true, stats: stats});
+        sendResponse({stats: stats});
       });
     });
     return true;
   }
   
-        // Handle new word added - log for Google Sheets integration
         if (request.action === 'wordAdded') {
           const word = request.word;
           chrome.storage.local.get(['sheetUrl'], (result) => {
             if (result.sheetUrl) {
-              // Log word for manual Google Sheets integration
-              console.log('New word added:', word);
-              console.log('Google Sheets URL:', result.sheetUrl);
-              console.log('To integrate with Google Sheets, you need to set up Google Sheets API');
             }
           });
           sendResponse({success: true});
           return true;
         }
         
-        // Handle logging to Google Sheets
         if (request.action === 'logToSheets') {
-          console.log('Received logToSheets request:', request.logData);
-          
           chrome.storage.local.get(['sheetUrl', 'sheetName'], async (result) => {
-            console.log('Storage result:', result);
-            
             if (!result.sheetUrl || !result.sheetName) {
-              console.log('Google Sheets not configured, skipping log');
-              console.log('sheetUrl:', result.sheetUrl);
-              console.log('sheetName:', result.sheetName);
-              
               sendResponse({
                 success: false, 
                 error: 'Google Sheets not configured',
@@ -175,9 +161,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }
             
             try {
-              // Call GoogleSheetsAPI directly using fetch to the API
               await logToGoogleSheetsDirectly(result.sheetUrl, result.sheetName, request.logData);
-              console.log('Successfully logged to Google Sheets:', request.logData);
               sendResponse({success: true});
             } catch (error) {
               console.error('Error logging to Google Sheets:', error);
@@ -188,12 +172,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 showNotification: true,
                 notificationMessage: `Không thể lưu vào Google Sheets: ${error.message}`
               });
+              return;
             }
           });
           return true;
         }
         
-        // Handle word reviewed with spaced repetition
         if (request.action === 'markWordReviewed') {
           chrome.storage.local.get(['highlightedWords'], (result) => {
             const words = result.highlightedWords || [];
@@ -203,27 +187,74 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               const now = Date.now();
               const word = words[wordIndex];
               
-              // Update review data
               word.lastReviewed = now;
               word.reviewCount = (word.reviewCount || 0) + 1;
               word.knewIt = request.knew;
               
-              // Spaced repetition algorithm
               if (request.knew) {
-                // If knew it, increase interval
-                const currentInterval = word.reviewInterval || 1; // days
-                word.reviewInterval = Math.min(currentInterval * 2, 30); // max 30 days
+                const currentInterval = word.reviewInterval || 1;
+                word.reviewInterval = Math.min(currentInterval * 2, 30);
                 word.nextReview = now + (word.reviewInterval * 24 * 60 * 60 * 1000);
               } else {
-                // If didn't know, reset interval
                 word.reviewInterval = 1;
-                word.nextReview = now + (24 * 60 * 60 * 1000); // 1 day
+                word.nextReview = now + (24 * 60 * 60 * 1000);
               }
               
               chrome.storage.local.set({highlightedWords: words});
             }
           });
           sendResponse({success: true});
+          return true;
+        }
+        
+        if (request.action === 'fetchDictionary') {
+          (async () => {
+            if (!request.word || typeof request.word !== 'string') {
+              sendResponse({success: false, error: 'Invalid word parameter'});
+              return;
+            }
+            
+            const dictResult = await fetchDictionaryDefinition(request.word);
+            
+            if (dictResult) {
+              chrome.storage.local.get(['highlightedWords', 'sheetUrl', 'sheetName'], async (result) => {
+                const words = result.highlightedWords || [];
+                const wordIndex = words.findIndex(w => w.word === request.word && w.url === request.url);
+                
+                if (wordIndex !== -1) {
+                  if (!words[wordIndex].meaning) words[wordIndex].meaning = dictResult.meaning;
+                  if (!words[wordIndex].pronunciation && dictResult.pronunciation) words[wordIndex].pronunciation = dictResult.pronunciation;
+                  if (!words[wordIndex].pos && dictResult.pos) words[wordIndex].pos = dictResult.pos;
+                  if (!words[wordIndex].translation && dictResult.translation) words[wordIndex].translation = dictResult.translation;
+                  if (!words[wordIndex].example && dictResult.example) words[wordIndex].example = dictResult.example;
+                  chrome.storage.local.set({highlightedWords: words});
+                }
+                
+                if (result.sheetUrl && result.sheetName) {
+                  const wordInStorage = words[wordIndex];
+                  const sheetData = {
+                    action: 'add',
+                    word: request.word,
+                    pronunciation: dictResult.pronunciation || '',
+                    pos: dictResult.pos || '',
+                    translation: dictResult.translation || '',
+                    example: dictResult.example || '',
+                    url: request.url,
+                    timestamp: new Date().toLocaleString(),
+                    domPath: wordInStorage?.domPath || '',
+                    startOffset: wordInStorage?.startOffset != null ? wordInStorage.startOffset : null,
+                    endOffset: wordInStorage?.endOffset != null ? wordInStorage.endOffset : null
+                  };
+                  try {
+                    await logToGoogleSheetsDirectly(result.sheetUrl, result.sheetName, sheetData);
+                  } catch (err) {
+                    console.error('Error updating Google Sheet with dictionary data:', err);
+                  }
+                }
+              });
+            }
+            sendResponse({success: true, meaning: dictResult});
+          })();
           return true;
         }
 });
@@ -233,13 +264,11 @@ function getRandomWordsForReview(words, count = 5) {
   
   const now = Date.now();
   
-  // Prioritize words that need review based on spaced repetition
   const wordsNeedingReview = words.filter(word => {
-    if (!word.nextReview) return true; // Never reviewed
-    return now >= word.nextReview; // Time for review
+    if (!word.nextReview) return true;
+    return now >= word.nextReview;
   });
   
-  // If not enough words need review, add some random ones
   let wordsToReview = [...wordsNeedingReview];
   if (wordsToReview.length < count) {
     const otherWords = words.filter(word => !wordsNeedingReview.includes(word));
@@ -247,26 +276,17 @@ function getRandomWordsForReview(words, count = 5) {
     wordsToReview = [...wordsToReview, ...shuffledOthers];
   }
   
-  // Shuffle and return requested count
   const shuffled = wordsToReview.sort(() => 0.5 - Math.random());
   return shuffled.slice(0, Math.min(count, shuffled.length));
 }
 
-// Direct Google Sheets logging function
 async function logToGoogleSheetsDirectly(sheetUrl, sheetName, logData) {
   try {
-    console.log('Loading credentials...');
-    
-    // Load credentials from vocabmaster.json
     const response = await fetch(chrome.runtime.getURL('vocabmaster.json'));
     const credentials = await response.json();
-    console.log('Credentials loaded');
     
-    // Create JWT token
     const jwt = await createJWT(credentials);
-    console.log('JWT created');
     
-    // Exchange JWT for access token
     const tokenResponse = await fetch(credentials.token_uri, {
       method: 'POST',
       headers: {
@@ -276,36 +296,52 @@ async function logToGoogleSheetsDirectly(sheetUrl, sheetName, logData) {
     });
     
     const tokenData = await tokenResponse.json();
-    console.log('Token response:', tokenData);
     
     if (tokenData.error) {
       throw new Error(tokenData.error_description || tokenData.error);
     }
     
     const accessToken = tokenData.access_token;
-    console.log('Access token obtained');
     
-    // Extract sheet ID from URL
     const sheetId = extractSheetId(sheetUrl);
     if (!sheetId) {
       throw new Error('Invalid Google Sheets URL');
     }
     
-    // URL encode the sheet name
     const encodedSheetName = encodeURIComponent(sheetName);
     
-    // Handle different actions
     if (logData.action === 'delete') {
       await deleteWordFromSheet(sheetId, encodedSheetName, accessToken, logData.word, logData.url);
     } else if (logData.action === 'delete_all') {
       await deleteWordsFromUrl(sheetId, encodedSheetName, accessToken, logData.url);
     } else {
-      // Add new word to sheet
-      const values = [
-        [logData.word, '', '', '', '', logData.url, logData.timestamp]
+      const rowData = [
+        logData.word || '',
+        logData.pronunciation || '',
+        logData.pos || '',
+        logData.translation || '',
+        logData.example || '',
+        logData.url || '',
+        logData.timestamp || ''
       ];
       
-      const sheetsResponse = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodedSheetName}!A:G:append?valueInputOption=USER_ENTERED`, {
+      // Fill empty columns H-Y (indices 7-24)
+      for (let i = 7; i < 25; i++) {
+        rowData[i] = '';
+      }
+      
+      // Column Z (index 25) - store domPath, startOffset, endOffset as JSON
+      const domPathData = {
+        domPath: logData.domPath || '',
+        startOffset: logData.startOffset || null,
+        endOffset: logData.endOffset || null
+      };
+      rowData[25] = JSON.stringify(domPathData);
+      
+      const values = [rowData];
+      const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodedSheetName}!A:Z:append?valueInputOption=USER_ENTERED`;
+      
+      const sheetsResponse = await fetch(appendUrl, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${accessToken}`,
@@ -317,11 +353,14 @@ async function logToGoogleSheetsDirectly(sheetUrl, sheetName, logData) {
       });
       
       if (!sheetsResponse.ok) {
-        const errorData = await sheetsResponse.json();
-        throw new Error(`HTTP error! status: ${sheetsResponse.status}, message: ${errorData.error?.message || 'Unknown error'}`);
+        const errorText = await sheetsResponse.text();
+        try {
+          const errorData = JSON.parse(errorText);
+          throw new Error(`HTTP error! status: ${sheetsResponse.status}, message: ${errorData.error?.message || 'Unknown error'}`);
+        } catch (parseError) {
+          throw new Error(`HTTP error! status: ${sheetsResponse.status}, response: ${errorText}`);
+        }
       }
-      
-      console.log('Successfully added word to Google Sheets');
     }
     
     return true;
@@ -365,7 +404,6 @@ async function deleteWordFromSheet(spreadsheetId, sheetName, accessToken, wordTo
       if (sheetWord === cmpWord && sheetUrl === cmpUrl) rowsToDelete.push(i);
     }
     if (rowsToDelete.length === 0) {
-      console.log(`[DEBUG] Không tìm thấy dòng nào khớp để xóa cho từ \"${wordToDelete}\" và url \"${urlToDelete}\".`);
       return;
     }
     rowsToDelete.sort((a, b) => b - a);
@@ -393,17 +431,14 @@ async function deleteWordFromSheet(spreadsheetId, sheetName, accessToken, wordTo
       const errorData = await deleteResponse.json();
       throw new Error(`Failed to delete row(s): ${errorData.error?.message || 'Unknown error'}`);
     }
-    console.log(`[DEBUG] Đã xóa thành công ${rowsToDelete.length} dòng cho từ \"${wordToDelete}\" tại url \"${urlToDelete}\".`);
   } catch (error) {
-    console.error('[DEBUG] Lỗi khi xoá từ khỏi sheet:', error);
+    console.error('Lỗi khi xoá từ khỏi sheet:', error);
     throw error;
   }
 }
 
-// Delete all words from specific URL
 async function deleteWordsFromUrl(sheetId, encodedSheetName, accessToken, urlToDelete) {
   try {
-    // First, get all data from the sheet
     const readResponse = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodedSheetName}!A:G`, {
       method: 'GET',
       headers: {
@@ -419,7 +454,6 @@ async function deleteWordsFromUrl(sheetId, encodedSheetName, accessToken, urlToD
     const readData = await readResponse.json();
     const rows = readData.values || [];
     
-    // Find rows to delete (matching the URL in column F)
     const rowsToDelete = [];
     for (let i = 0; i < rows.length; i++) {
       if (rows[i][5] && rows[i][5] === urlToDelete) {
@@ -428,11 +462,9 @@ async function deleteWordsFromUrl(sheetId, encodedSheetName, accessToken, urlToD
     }
     
     if (rowsToDelete.length === 0) {
-      console.log(`No words found for URL "${urlToDelete}"`);
       return;
     }
     
-    // Delete rows from bottom to top to maintain correct indices
     for (let i = rowsToDelete.length - 1; i >= 0; i--) {
       const rowIndex = rowsToDelete[i];
       
@@ -464,74 +496,36 @@ async function deleteWordsFromUrl(sheetId, encodedSheetName, accessToken, urlToD
       }
     }
     
-    console.log(`Successfully deleted ${rowsToDelete.length} row(s) for URL "${urlToDelete}"`);
   } catch (error) {
     console.error('Error deleting words from URL:', error);
     throw error;
   }
 }
 
-// Extract sheet ID from URL
 function extractSheetId(url) {
   const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
   return match ? match[1] : null;
 }
 
-// Create JWT token
 async function createJWT(credentials) {
   const header = {
-    "alg": "RS256",
-    "typ": "JWT"
+    alg: 'RS256',
+    typ: 'JWT'
   };
-
+  
   const now = Math.floor(Date.now() / 1000);
   const payload = {
-    "iss": credentials.client_email,
-    "scope": "https://www.googleapis.com/auth/spreadsheets",
-    "aud": credentials.token_uri,
-    "exp": now + 3600,
-    "iat": now
+    iss: credentials.client_email,
+    scope: 'https://www.googleapis.com/auth/spreadsheets',
+    aud: credentials.token_uri,
+    exp: now + 3600,
+    iat: now
   };
-
+  
   const encodedHeader = base64UrlEncode(JSON.stringify(header));
   const encodedPayload = base64UrlEncode(JSON.stringify(payload));
   
-  const signature = await signJWT(`${encodedHeader}.${encodedPayload}`, credentials.private_key);
-  const encodedSignature = base64UrlEncodeBytes(signature);
-  
-  return `${encodedHeader}.${encodedPayload}.${encodedSignature}`;
-}
-
-// Base64 URL encode for strings
-function base64UrlEncode(str) {
-  const utf8Bytes = new TextEncoder().encode(str);
-  let binaryString = '';
-  for (let i = 0; i < utf8Bytes.length; i++) {
-    binaryString += String.fromCharCode(utf8Bytes[i]);
-  }
-  const base64 = btoa(binaryString);
-  return base64
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=/g, '');
-}
-
-// Base64 URL encode for Uint8Array
-function base64UrlEncodeBytes(bytes) {
-  let binaryString = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binaryString += String.fromCharCode(bytes[i]);
-  }
-  const base64 = btoa(binaryString);
-  return base64
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=/g, '');
-}
-
-// Sign JWT with private key
-async function signJWT(data, privateKey) {
-  const privateKeyPem = privateKey.replace(/\\n/g, '\n');
+  const privateKeyPem = credentials.private_key.replace(/\\n/g, '\n');
   const keyData = pemToArrayBuffer(privateKeyPem);
   
   const key = await crypto.subtle.importKey(
@@ -548,13 +542,39 @@ async function signJWT(data, privateKey) {
   const signature = await crypto.subtle.sign(
     'RSASSA-PKCS1-v1_5',
     key,
-    new TextEncoder().encode(data)
+    new TextEncoder().encode(`${encodedHeader}.${encodedPayload}`)
   );
   
-  return new Uint8Array(signature);
+  const encodedSignature = base64UrlEncodeBytes(new Uint8Array(signature));
+  
+  return `${encodedHeader}.${encodedPayload}.${encodedSignature}`;
 }
 
-// Convert PEM to ArrayBuffer
+function base64UrlEncode(str) {
+  const utf8Bytes = new TextEncoder().encode(str);
+  let binaryString = '';
+  for (let i = 0; i < utf8Bytes.length; i++) {
+    binaryString += String.fromCharCode(utf8Bytes[i]);
+  }
+  const base64 = btoa(binaryString);
+  return base64
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '');
+}
+
+function base64UrlEncodeBytes(bytes) {
+  let binaryString = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binaryString += String.fromCharCode(bytes[i]);
+  }
+  const base64 = btoa(binaryString);
+  return base64
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '');
+}
+
 function pemToArrayBuffer(pem) {
   const pemHeader = "-----BEGIN PRIVATE KEY-----";
   const pemFooter = "-----END PRIVATE KEY-----";
@@ -565,4 +585,202 @@ function pemToArrayBuffer(pem) {
     binaryDer[i] = binaryDerString.charCodeAt(i);
   }
   return binaryDer.buffer;
+}
+
+async function loadWordsFromSheet() {
+  try {
+    const result = await new Promise((resolve) => {
+      chrome.storage.local.get(['sheetUrl', 'sheetName'], resolve);
+    });
+    
+    if (!result.sheetUrl || !result.sheetName) {
+      return [];
+    }
+    
+    const response = await fetch(chrome.runtime.getURL('vocabmaster.json'));
+    const credentials = await response.json();
+    
+    const jwt = await createJWT(credentials);
+    
+    const tokenResponse = await fetch(credentials.token_uri, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`
+    });
+    
+    const tokenData = await tokenResponse.json();
+    
+    if (tokenData.error) {
+      throw new Error(tokenData.error_description || tokenData.error);
+    }
+    
+    const accessToken = tokenData.access_token;
+    const sheetId = extractSheetId(result.sheetUrl);
+    if (!sheetId) {
+      return [];
+    }
+    
+    const encodedSheetName = encodeURIComponent(result.sheetName);
+    const readResponse = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodedSheetName}!A:Z`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    if (!readResponse.ok) {
+      return [];
+    }
+    
+    const readData = await readResponse.json();
+    const rows = readData.values || [];
+    
+    if (rows.length === 0) {
+      return [];
+    }
+    
+    const words = [];
+    let startIdx = 0;
+    
+    // Check if first row is header row
+    if (rows.length > 0 && rows[0][0]) {
+      const firstCell = rows[0][0].toLowerCase().trim();
+      if (firstCell === 'new word' || firstCell === 'từ' || firstCell === 'word' || firstCell === 'từ mới') {
+        startIdx = 1;
+      }
+    }
+    
+    for (let i = startIdx; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row[0] || row[0].trim() === '') continue;
+      
+      // Cấu trúc: A=New word, B=IPA, C=Type, D=Meaning, E=Example, F=URL, G=Timestamp, Z=domPath data (JSON)
+      const word = row[0].trim();
+      const pronunciation = row[1] || '';
+      const pos = row[2] || '';
+      const translation = row[3] || '';
+      const example = row[4] || '';
+      const url = row[5] || '';
+      const timestamp = row[6] || '';
+      
+      // Column Z (index 25) - parse JSON containing domPath, startOffset, endOffset
+      let domPath = '';
+      let startOffset = null;
+      let endOffset = null;
+      if (row[25]) {
+        try {
+          const domPathData = JSON.parse(row[25]);
+          domPath = domPathData.domPath || '';
+          startOffset = domPathData.startOffset != null ? domPathData.startOffset : null;
+          endOffset = domPathData.endOffset != null ? domPathData.endOffset : null;
+        } catch (e) {
+          // If not JSON, treat as plain string (backward compatibility)
+          domPath = row[25] || '';
+        }
+      }
+      
+      // Build meaning string: [pos] pronunciation translation (if available)
+      let meaning = '';
+      if (pos || pronunciation || translation) {
+        let prefix = '';
+        if (pos) prefix = `[${pos}] `;
+        if (pronunciation) prefix = `${prefix}${pronunciation} `;
+        meaning = prefix + (translation || '');
+      }
+      
+      words.push({
+        word: word.toLowerCase(),
+        meaning: meaning,
+        pronunciation: pronunciation,
+        pos: pos,
+        translation: translation,
+        example: example,
+        url: url || '',
+        timestamp: timestamp || '',
+        domPath: domPath,
+        startOffset: startOffset,
+        endOffset: endOffset,
+        fromSheet: true,
+        firstHighlighted: Date.now(),
+        lastHighlighted: Date.now(),
+        count: 1
+      });
+    }
+    
+    return words;
+  } catch (error) {
+    console.error('Error loading words from sheet:', error);
+    return [];
+  }
+}
+
+async function fetchDictionaryDefinition(word) {
+  try {
+    if (!word || typeof word !== 'string' || word.trim() === '') {
+      return null;
+    }
+    
+    const url = `https://dictionary-api.eliaschen.dev/api/dictionary/en/${encodeURIComponent(word.toLowerCase().trim())}`;
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      if (response.status === 404) {
+        return null;
+      }
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    if (!data || !data.definition || !Array.isArray(data.definition) || data.definition.length === 0) {
+      return null;
+    }
+    
+    const firstDefinition = data.definition[0];
+    let meaning = firstDefinition.text || '';
+    let translation = firstDefinition.translation || '';
+    let example = '';
+    
+    if (firstDefinition.example && Array.isArray(firstDefinition.example) && firstDefinition.example.length > 0) {
+      example = firstDefinition.example[0].text || '';
+    }
+    
+    let pos = '';
+    if (data.pos && Array.isArray(data.pos) && data.pos.length > 0) {
+      pos = data.pos[0];
+    }
+    
+    let pronunciation = '';
+    if (data.pronunciation && Array.isArray(data.pronunciation) && data.pronunciation.length > 0) {
+      const usPron = data.pronunciation.find(p => p.lang === 'us');
+      if (usPron && usPron.pron) {
+        pronunciation = usPron.pron;
+      }
+    }
+    let displayMeaning = meaning;
+    if (translation && translation.trim()) {
+      displayMeaning += ` | ${translation.trim()}`;
+    }
+    if (example) {
+      displayMeaning += ` (VD: ${example})`;
+    }
+    
+    let prefix = '';
+    if (pos) prefix = `[${pos}] `;
+    if (pronunciation) prefix = `${prefix}${pronunciation} `;
+    
+    return {
+      meaning: prefix + displayMeaning,
+      pronunciation: pronunciation,
+      pos: pos,
+      translation: translation.trim(),
+      example: example
+    };
+  } catch (error) {
+    console.error('Error fetching dictionary definition:', error);
+    return null;
+  }
 }

@@ -268,13 +268,15 @@
   
   <!-- Highlights Tab -->
   <div class="tab-content active" id="highlights">
+    <div style="margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; padding: 8px; background: #f8f9fa; border-radius: 4px;">
+      <span style="font-size: 12px; color: #666;">Chế độ:</span>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <button id="filterModeAll" style="padding: 6px 12px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold;">All</button>
+        <button id="filterModeCurrent" style="padding: 6px 12px; background: #e0e0e0; color: #666; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">Only</button>
+      </div>
+    </div>
     <div class="word-list" id="wordList">
       <!-- Words will be populated here -->
-    </div>
-    
-    <div style="margin-top: 10px;">
-      <button class="delete-btn" id="deleteAll" style="width: 48%; margin-right: 4%;">🗑️ Xóa Tất Cả</button>
-      <button class="delete-btn" id="copyAll" style="width: 48%; background: #2196F3;">📋 Sao Chép Tất Cả</button>
     </div>
   </div>
   
@@ -347,12 +349,20 @@
       <h3 style="margin: 0 0 15px 0; color: #333; font-size: 16px;">📚 Cài Đặt Ôn Tập</h3>
       <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Số từ hiển thị mỗi lần:</label>
       <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
-        <input type="number" id="wordCount" min="1" max="20" value="5" style="width: 80px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; text-align: center;">
+        <input type="number" id="wordCount" min="1" max="100" value="5" style="width: 80px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; text-align: center;">
         <span style="color: #666; font-size: 14px;">từ</span>
         <button id="saveWordCount" style="padding: 8px 15px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Lưu</button>
       </div>
       <div style="font-size: 11px; color: #666; padding: 8px; background: #f8f9fa; border-radius: 4px;">
         💡 Sử dụng phương pháp lặp lại ngắt quãng để tối ưu việc học từ vựng
+      </div>
+    </div>
+    
+    <div style="margin-bottom: 20px;">
+      <h3 style="margin: 0 0 15px 0; color: #333; font-size: 16px;">🔄 Đồng Bộ Google Sheet</h3>
+      <button id="reloadFromSheet" style="padding: 10px 20px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 14px; width: 100%;">🔄 Reload từ Sheet</button>
+      <div style="font-size: 11px; color: #666; padding: 8px; background: #f8f9fa; border-radius: 4px; margin-top: 10px;">
+        💡 Reload từ Google Sheet sẽ đồng bộ nghĩa và vị trí highlight từ Sheet vào extension
       </div>
     </div>
     

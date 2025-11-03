@@ -13,7 +13,8 @@
   ],
   "host_permissions": [
     "https://sheets.googleapis.com/*",
-    "https://www.googleapis.com/*"
+    "https://www.googleapis.com/*",
+    "https://dictionary-api.eliaschen.dev/*"
   ],
   "web_accessible_resources": [
     {

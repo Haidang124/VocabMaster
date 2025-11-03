@@ -22,6 +22,42 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.action === 'updateShortcut') {
     shortcutSettings = request.shortcut;
     sendResponse({success: true});
+  } else if (request.action === 'reloadHighlights') {
+    // Reload highlights from Sheet data
+    const words = request.words || [];
+    for (const wordObj of words) {
+      if (!wordObj.domPath || wordObj.startOffset == null || wordObj.endOffset == null) continue;
+      const node = getNodeByDomPath(wordObj.domPath);
+      if (node && node.nodeType === 3) {
+        try {
+          const range = document.createRange();
+          range.setStart(node, wordObj.startOffset);
+          range.setEnd(node, wordObj.endOffset);
+          
+          const existingSpan = range.commonAncestorContainer.parentElement;
+          if (existingSpan && existingSpan.classList && existingSpan.classList.contains('vocabulary-highlight')) {
+            continue;
+          }
+          
+          const span = document.createElement('span');
+          span.className = 'vocabulary-highlight';
+          span.style.backgroundColor = wordObj.color || '#FFEB3B';
+          span.style.borderRadius = '3px';
+          span.style.fontWeight = 'normal';
+          span.setAttribute('data-word', wordObj.word);
+          span.setAttribute('data-timestamp', wordObj.lastHighlighted || Date.now());
+          span.textContent = range.toString();
+          range.deleteContents();
+          range.insertNode(span);
+          
+          span.addEventListener('mouseenter', (e) => {
+            const wordText = span.getAttribute('data-word') || span.textContent.trim().toLowerCase();
+            showActionMenu(e.pageX, e.pageY, wordText, span);
+          });
+        } catch (e) {}
+      }
+    }
+    sendResponse({success: true});
   }
 });
 
@@ -126,7 +162,6 @@ function highlightSelectedWord() {
     // Tạo highlight bình thường
     const span = document.createElement('span');
     span.style.backgroundColor = highlightColor;
-    span.style.padding = '2px 4px';
     span.style.borderRadius = '3px';
     span.style.fontWeight = 'normal';
     span.className = 'vocabulary-highlight';
@@ -145,25 +180,23 @@ function highlightSelectedWord() {
 
     saveWordToStorage(selectedWord, domPath, startOffset, endOffset);
 
-    // Gửi về background để log lên Google Sheet
-    chrome.runtime.sendMessage({
-      action: 'logToSheets',
-      logData: {
-        action: 'add',
-        word: selectedWord,
-        timestamp: new Date().toLocaleString(),
-        url: window.location.href
-      }
-    }, (response) => {
-      if (chrome.runtime.lastError) {
-        console.error('Error sending message to background:', chrome.runtime.lastError);
-      } else {
-        console.log('Response from background:', response);
-      }
-    });
-    // Google Sheets ... giữ code cũ
+    const wordToLookup = selectedWord;
+    const urlToLookup = window.location.href;
+
     window.getSelection().removeAllRanges();
     selectedWord = null; selectedRange = null;
+
+    setTimeout(() => {
+      if (!wordToLookup || typeof wordToLookup !== 'string') {
+        return;
+      }
+      
+      chrome.runtime.sendMessage({
+        action: 'fetchDictionary',
+        word: wordToLookup,
+        url: urlToLookup
+      });
+    }, 100);
   } catch {}
 }
 
@@ -197,6 +230,11 @@ function showActionMenu(x, y, text, spanElement) {
   if (existingTooltip) {
     existingTooltip.remove();
   }
+  
+  // Get position of spanElement (the highlighted word)
+  const rect = spanElement.getBoundingClientRect();
+  const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+  const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
   
   const tooltip = document.createElement('div');
   tooltip.id = 'vocab-tooltip';
@@ -260,9 +298,11 @@ function showActionMenu(x, y, text, spanElement) {
           </div>
         `;
   
-  tooltip.style.position = 'absolute';
-  tooltip.style.left = (x - 30) + 'px';
-  tooltip.style.top = (y - 60) + 'px';
+  // Position tooltip above the word, centered horizontally
+  const tooltipWidth = 80; // Approximate width of tooltip
+  const tooltipHeight = 40; // Approximate height of tooltip
+  tooltip.style.left = (rect.left + scrollLeft + (rect.width / 2) - (tooltipWidth / 2)) + 'px';
+  tooltip.style.top = (rect.top + scrollTop - tooltipHeight - 5) + 'px';
   tooltip.style.zIndex = '2147483647';
   tooltip.style.pointerEvents = 'auto';
   tooltip.style.backgroundColor = 'white';
@@ -292,34 +332,25 @@ function showActionMenu(x, y, text, spanElement) {
   
   highlightBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    showColorPicker(x, y, text, spanElement);
+    const rect = spanElement.getBoundingClientRect();
+    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+    const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+    showColorPicker(rect.left + scrollLeft + (rect.width / 2), rect.top + scrollTop, text, spanElement);
     tooltip.remove();
   });
   
   deleteBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    console.log('Delete button clicked for word:', text);
     try {
-      // Remove highlight
       const parent = spanElement.parentNode;
       parent.replaceChild(document.createTextNode(spanElement.textContent), spanElement);
       parent.normalize();
-      console.log('Highlight removed from DOM');
       
-      // Remove from storage and log to Google Sheets
-      console.log('Sending deleteWord message for word:', text.toLowerCase());
       chrome.runtime.sendMessage({
         action: 'deleteWord',
         word: text.toLowerCase(),
         url: window.location.href
-      }, (response) => {
-        if (chrome.runtime.lastError) {
-          console.error('Error deleting word:', chrome.runtime.lastError);
-        } else {
-          console.log('Word deleted successfully:', response);
-        }
       });
-      
     } catch (error) {
       console.error('Error in delete button click:', error);
     }
@@ -467,7 +498,6 @@ function showNotification(message, type = 'success') {
   notification.textContent = message;
   document.body.appendChild(notification);
   
-  // Auto remove after 4 seconds
   setTimeout(() => {
     if (notification.parentNode) {
       notification.style.animation = 'slideIn 0.3s ease-out reverse';
@@ -480,7 +510,6 @@ function showNotification(message, type = 'success') {
   }, 4000);
 }
 
-// ====== TỰ ĐỘNG HIỂN THỊ HIGHLIGHT KHI LOAD LẠI TRANG ======
 function autoHighlightSavedWords() {
   chrome.storage.local.get(['highlightedWords'], (result) => {
     const words = (result.highlightedWords || []).filter(w => w.url === window.location.href);
@@ -495,9 +524,19 @@ function autoHighlightSavedWords() {
           const span = document.createElement('span');
           span.className = 'vocabulary-highlight';
           span.style.backgroundColor = obj.color || '#FFEB3B';
+          span.style.borderRadius = '3px';
+          span.style.fontWeight = 'normal';
+          span.setAttribute('data-word', obj.word);
+          span.setAttribute('data-timestamp', obj.lastHighlighted || Date.now());
           span.textContent = range.toString();
           range.deleteContents();
           range.insertNode(span);
+          
+          // Add event listener để hiện action menu khi hover
+          span.addEventListener('mouseenter', (e) => {
+            const wordText = span.getAttribute('data-word') || span.textContent.trim().toLowerCase();
+            showActionMenu(e.pageX, e.pageY, wordText, span);
+          });
         } catch (e) {}
       }
     }
@@ -543,9 +582,7 @@ function highlightWordOnPage(word, color) {
 
 window.addEventListener('load', () => setTimeout(autoHighlightSavedWords, 800));
 
-// Initialize - load settings without changing cursor
 chrome.storage.local.get(['highlightColor', 'shortcutSettings'], (result) => {
   highlightColor = result.highlightColor || '#FFEB3B';
   shortcutSettings = result.shortcutSettings || {modifier: 'alt', key: 'f'};
-  // Không thay đổi cursor mặc định để không làm phiền người dùng
 });

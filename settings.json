@@ -4,7 +4,8 @@
     "key": "H"
   },
   "highlightColor": "#FFEB3B",
-  "wordCount": 5,
+  "wordCount": 20,
+  "wordFilterMode": "current",
   "sheetUrl": "https://docs.google.com/spreadsheets/d/1esJJVzgowqyY8YXeps4fN3acToqpMuETkdP1JsJbQeI/edit?usp=sharing",
   "sheetName": "Newword",
   "selectedSheetId": "",

@@ -3,6 +3,25 @@ let currentTab = 'highlights';
 let highlightedWords = [];
 let reviewWords = [];
 let currentReviewIndex = 0;
+let wordFilterMode = 'current'; // 'all' or 'current' - default is 'current'
+let currentPageUrl = null;
+
+// Load wordFilterMode from storage
+function loadWordFilterMode() {
+  chrome.storage.local.get(['wordFilterMode'], (result) => {
+    if (result.wordFilterMode) {
+      wordFilterMode = result.wordFilterMode;
+    }
+    updateFilterButtons();
+  });
+}
+
+// Save wordFilterMode to storage
+function saveWordFilterMode(mode) {
+  wordFilterMode = mode;
+  chrome.storage.local.set({wordFilterMode: mode});
+  updateFilterButtons();
+}
 
 // Initialize popup
 document.addEventListener('DOMContentLoaded', () => {
@@ -25,7 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return true; // Keep message channel open for async response
       }
     });
-  }, 100);
+  }, 50);
 });
 
 function initializeTabs() {
@@ -46,8 +65,13 @@ function initializeTabs() {
       currentTab = tabName;
       
       if (tabName === 'highlights') {
-        // Load words when switching to highlights tab
-        loadWords();
+        // Get current page URL and load words when switching to highlights tab
+        chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+          if (tabs[0]) {
+            currentPageUrl = tabs[0].url;
+          }
+          loadWords();
+        });
       } else if (tabName === 'review') {
         loadReviewWords();
       } else if (tabName === 'settings') {
@@ -149,8 +173,8 @@ function initializeControls() {
     saveWordCountBtn.addEventListener('click', () => {
       const count = parseInt(document.getElementById('wordCount').value);
       
-      if (count < 1 || count > 20) {
-        showNotification('Số từ phải từ 1 đến 20', 'error');
+      if (count < 1 || count > 100) {
+        showNotification('Số từ phải từ 1 đến 100', 'error');
         return;
       }
       
@@ -165,34 +189,13 @@ function initializeControls() {
     loadReviewWords();
   });
   
-  // Delete all button
-  document.getElementById('deleteAll').addEventListener('click', () => {
-    // Get current tab URL
-    chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
-      const currentUrl = tabs[0]?.url || 'Unknown';
-      
-      if (confirm(`Bạn có chắc muốn xóa tất cả từ đã highlight từ trang này?\n\nURL: ${currentUrl}`)) {
-        chrome.runtime.sendMessage({
-          action: 'deleteAllWords',
-          currentUrl: currentUrl
-        }, (response) => {
-          if (response.success) {
-            loadWords();
-            showNotification(`Đã xóa ${response.deletedCount} từ từ trang này! Còn lại ${response.remainingCount} từ từ các trang khác.`);
-          }
-        });
-      }
+  // Reload from Sheet button
+  const reloadFromSheetBtn = document.getElementById('reloadFromSheet');
+  if (reloadFromSheetBtn) {
+    reloadFromSheetBtn.addEventListener('click', () => {
+      reloadWordsFromSheet();
     });
-  });
-  
-  // Copy all button
-  document.getElementById('copyAll').addEventListener('click', () => {
-    const wordsText = highlightedWords.map(w => `${w.word} - ${w.meaning || 'Chưa có nghĩa'}`).join('\n');
-    navigator.clipboard.writeText(wordsText).then(() => {
-      showNotification('Đã sao chép tất cả từ vào clipboard!');
-    });
-  });
-  
+  }
         
         // Fetch sheets button
         const fetchSheetsBtn = document.getElementById('fetchSheets');
@@ -310,8 +313,55 @@ function initializeControls() {
 }
 
 function initializeWordList() {
-  // Load words when initializing
-  loadWords();
+  // Get current page URL and load words when initializing
+  chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+    if (tabs[0]) {
+      currentPageUrl = tabs[0].url;
+    }
+    
+    // Initialize filter mode buttons
+    const filterModeAll = document.getElementById('filterModeAll');
+    const filterModeCurrent = document.getElementById('filterModeCurrent');
+    
+    if (filterModeAll && filterModeCurrent) {
+      filterModeAll.addEventListener('click', () => {
+        saveWordFilterMode('all');
+        loadWords();
+      });
+      
+      filterModeCurrent.addEventListener('click', () => {
+        saveWordFilterMode('current');
+        loadWords();
+      });
+      
+      loadWordFilterMode();
+    }
+    
+    loadWords();
+  });
+}
+
+function updateFilterButtons() {
+  const filterModeAll = document.getElementById('filterModeAll');
+  const filterModeCurrent = document.getElementById('filterModeCurrent');
+  
+  if (filterModeAll && filterModeCurrent) {
+    if (wordFilterMode === 'all') {
+      filterModeAll.style.background = '#4CAF50';
+      filterModeAll.style.color = 'white';
+      filterModeAll.style.fontWeight = 'bold';
+      filterModeCurrent.style.background = '#e0e0e0';
+      filterModeCurrent.style.color = '#666';
+      filterModeCurrent.style.fontWeight = 'normal';
+    } else {
+      filterModeAll.style.background = '#e0e0e0';
+      filterModeAll.style.color = '#666';
+      filterModeAll.style.fontWeight = 'normal';
+      filterModeCurrent.style.background = '#4CAF50';
+      filterModeCurrent.style.color = 'white';
+      filterModeCurrent.style.fontWeight = 'bold';
+    }
+  }
 }
 
 function initializeReview() {
@@ -328,10 +378,103 @@ function initializeReview() {
 }
 
 function loadWords() {
+  // Load from localStorage first (fast)
   chrome.runtime.sendMessage({action: 'getHighlightedWords'}, (response) => {
-    highlightedWords = response.words || [];
-    console.log('Loaded words:', highlightedWords.length, highlightedWords);
+    const wordsFromStorage = response.words || [];
+    
+    let allWords = wordsFromStorage;
+    
+    // Filter by URL if mode is 'current'
+    if (wordFilterMode === 'current' && currentPageUrl) {
+      allWords = allWords.filter(word => word.url === currentPageUrl);
+    }
+    
+    highlightedWords = allWords;
     updateWordList();
+  });
+}
+
+function reloadWordsFromSheet() {
+  const reloadBtn = document.getElementById('reloadFromSheet');
+  if (reloadBtn) {
+    reloadBtn.textContent = '⏳ Đang tải...';
+    reloadBtn.disabled = true;
+  }
+  
+  chrome.runtime.sendMessage({action: 'loadWordsFromSheet'}, (response) => {
+    const wordsFromSheet = response.words || [];
+    
+    if (wordsFromSheet.length === 0) {
+      showNotification('Không có dữ liệu từ Google Sheet', 'error');
+      if (reloadBtn) {
+        reloadBtn.textContent = '🔄 Reload từ Sheet';
+        reloadBtn.disabled = false;
+      }
+      return;
+    }
+    
+    // Get current words from storage
+    chrome.runtime.sendMessage({action: 'getHighlightedWords'}, (response2) => {
+      const wordsFromStorage = response2.words || [];
+      const wordMap = new Map();
+      
+      // First add words from storage
+      for (const word of wordsFromStorage) {
+        const key = `${word.word.toLowerCase()}_${word.url || ''}`;
+        wordMap.set(key, word);
+      }
+      
+      // Merge with words from Sheet (Sheet data takes priority, including domPath)
+      for (const word of wordsFromSheet) {
+        const key = `${word.word.toLowerCase()}_${word.url || ''}`;
+        const existingWord = wordMap.get(key);
+        
+        if (existingWord) {
+          // Update existing word with Sheet data
+          if (word.translation) existingWord.translation = word.translation;
+          if (word.pronunciation) existingWord.pronunciation = word.pronunciation;
+          if (word.pos) existingWord.pos = word.pos;
+          if (word.example) existingWord.example = word.example;
+          if (word.domPath) existingWord.domPath = word.domPath;
+          if (word.startOffset != null) existingWord.startOffset = word.startOffset;
+          if (word.endOffset != null) existingWord.endOffset = word.endOffset;
+        } else {
+          // New word from Sheet
+          wordMap.set(key, word);
+        }
+      }
+      
+      // Save all merged words back to storage
+      const allWords = Array.from(wordMap.values());
+      chrome.storage.local.set({highlightedWords: allWords}, () => {
+        // Send message to content script to highlight words with domPath from current page
+        chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+          if (tabs[0]) {
+            const wordsToHighlight = allWords.filter(w => 
+              w.url === tabs[0].url && 
+              w.domPath && 
+              w.startOffset != null && 
+              w.endOffset != null
+            );
+            if (wordsToHighlight.length > 0) {
+              chrome.tabs.sendMessage(tabs[0].id, {
+                action: 'reloadHighlights',
+                words: wordsToHighlight
+              });
+            }
+          }
+        });
+        
+        // Reload word list
+        loadWords();
+        showNotification(`Đã reload ${wordsFromSheet.length} từ từ Google Sheet!`);
+        
+        if (reloadBtn) {
+          reloadBtn.textContent = '🔄 Reload từ Sheet';
+          reloadBtn.disabled = false;
+        }
+      });
+    });
   });
 }
 
@@ -344,15 +487,27 @@ function updateWordList() {
     return;
   }
   
-  wordList.innerHTML = highlightedWords.map(word => `
+  wordList.innerHTML = highlightedWords.map(word => {
+    const translation = word.translation || '';
+    
+    let displayText = '';
+    if (translation && translation.trim()) {
+      displayText = `${word.word} : ${translation.trim()}`;
+    } else {
+      displayText = `${word.word} :`;
+    }
+    
+    const example = word.example || '';
+    
+    return `
     <div class="word-item">
       <div>
-        <div class="word-text">${word.word}</div>
-        <div class="word-meaning">${word.meaning || 'Chưa có nghĩa'}</div>
+        <div class="word-text" style="font-size: 14px; margin-bottom: ${example ? '4px' : '0'};">${displayText}</div>
+        ${example ? `<div class="word-meaning" style="font-size: 12px; color: #666; font-style: italic;">${example}</div>` : ''}
       </div>
-      <button class="delete-btn" onclick="deleteWord('${word.word}')">🗑️</button>
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
 
 function deleteWord(word) {
@@ -382,6 +537,10 @@ function displayReviewWords(words) {
   container.innerHTML = '';
   
   words.forEach((word, index) => {
+    const meaning = word.translation || word.meaning || 'Chưa có nghĩa';
+    const displayText = `${word.word} : ${meaning}`;
+    const example = word.example || '';
+    
     const wordDiv = document.createElement('div');
     wordDiv.style.cssText = `
       background: white;
@@ -398,8 +557,8 @@ function displayReviewWords(words) {
         <div style="display: flex; align-items: center; flex: 1;">
           <div style="font-size: 12px; color: #666; margin-right: 12px; font-weight: bold;">#${index + 1}</div>
           <div style="flex: 1;">
-            <div style="font-size: 18px; font-weight: bold; color: #333; margin-bottom: 4px;">${word.word}</div>
-            <div style="font-size: 14px; color: #666;">${word.meaning || 'Chưa có nghĩa'}</div>
+            <div style="font-size: 14px; color: #333; margin-bottom: ${example ? '4px' : '0'};">${displayText}</div>
+            ${example ? `<div style="font-size: 12px; color: #666; font-style: italic;">${example}</div>` : ''}
           </div>
         </div>
         <div style="display: flex; gap: 4px;">
@@ -759,7 +918,8 @@ function exportSettingsToFile() {
   chrome.storage.local.get([
     'shortcutSettings', 
     'highlightColor', 
-    'wordCount', 
+    'wordCount',
+    'wordFilterMode',
     'sheetUrl',
     'sheetName',
     'selectedSheetId'
@@ -768,6 +928,7 @@ function exportSettingsToFile() {
       shortcutSettings: result.shortcutSettings || {modifier: 'alt', key: 'h'},
       highlightColor: result.highlightColor || '#FFEB3B',
       wordCount: result.wordCount || 5,
+      wordFilterMode: result.wordFilterMode || 'current',
       sheetUrl: result.sheetUrl || 'https://docs.google.com/spreadsheets/d/1LTnXrNzm-MM6a5ElqhwUqNa70wsOVNJI2Wr7zGwZwb0/edit',
       sheetName: result.sheetName || '',
       selectedSheetId: result.selectedSheetId || '',
@@ -803,6 +964,7 @@ function importSettingsFromFile(file) {
           shortcutSettings: settings.shortcutSettings,
           highlightColor: settings.highlightColor,
           wordCount: settings.wordCount,
+          wordFilterMode: settings.wordFilterMode || 'current',
           sheetUrl: settings.sheetUrl || 'https://docs.google.com/spreadsheets/d/1LTnXrNzm-MM6a5ElqhwUqNa70wsOVNJI2Wr7zGwZwb0/edit',
           sheetName: settings.sheetName || '',
           selectedSheetId: settings.selectedSheetId || ''
@@ -831,6 +993,7 @@ function loadDefaultSettings() {
         shortcutSettings: fileSettings.shortcutSettings,
         highlightColor: fileSettings.highlightColor,
         wordCount: fileSettings.wordCount,
+        wordFilterMode: fileSettings.wordFilterMode || 'current',
         sheetUrl: fileSettings.sheetUrl || 'https://docs.google.com/spreadsheets/d/1LTnXrNzm-MM6a5ElqhwUqNa70wsOVNJI2Wr7zGwZwb0/edit',
         sheetName: fileSettings.sheetName || '',
         selectedSheetId: fileSettings.selectedSheetId || ''
@@ -848,6 +1011,7 @@ function loadDefaultSettings() {
         shortcutSettings: {modifier: 'alt', key: 'h'},
         highlightColor: '#FFEB3B',
         wordCount: 5,
+        wordFilterMode: 'current',
         sheetUrl: 'https://docs.google.com/spreadsheets/d/1LTnXrNzm-MM6a5ElqhwUqNa70wsOVNJI2Wr7zGwZwb0/edit',
         sheetName: '',
         selectedSheetId: ''
