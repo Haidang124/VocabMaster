@@ -315,6 +315,7 @@ async function logToGoogleSheetsDirectly(sheetUrl, sheetName, logData) {
     } else if (logData.action === 'delete_all') {
       await deleteWordsFromUrl(sheetId, encodedSheetName, accessToken, logData.url);
     } else {
+      // First append main data to columns A-G
       const rowData = [
         logData.word || '',
         logData.pronunciation || '',
@@ -325,21 +326,8 @@ async function logToGoogleSheetsDirectly(sheetUrl, sheetName, logData) {
         logData.timestamp || ''
       ];
       
-      // Fill empty columns H-Y (indices 7-24)
-      for (let i = 7; i < 25; i++) {
-        rowData[i] = '';
-      }
-      
-      // Column Z (index 25) - store domPath, startOffset, endOffset as JSON
-      const domPathData = {
-        domPath: logData.domPath || '',
-        startOffset: logData.startOffset || null,
-        endOffset: logData.endOffset || null
-      };
-      rowData[25] = JSON.stringify(domPathData);
-      
       const values = [rowData];
-      const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodedSheetName}!A:Z:append?valueInputOption=USER_ENTERED`;
+      const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodedSheetName}!A:G:append?valueInputOption=USER_ENTERED`;
       
       const sheetsResponse = await fetch(appendUrl, {
         method: 'POST',
@@ -352,6 +340,8 @@ async function logToGoogleSheetsDirectly(sheetUrl, sheetName, logData) {
         })
       });
       
+      // Get the appended row number from response
+      let appendResult;
       if (!sheetsResponse.ok) {
         const errorText = await sheetsResponse.text();
         try {
@@ -360,6 +350,72 @@ async function logToGoogleSheetsDirectly(sheetUrl, sheetName, logData) {
         } catch (parseError) {
           throw new Error(`HTTP error! status: ${sheetsResponse.status}, response: ${errorText}`);
         }
+      } else {
+        appendResult = await sheetsResponse.json();
+      }
+      
+      // Try to get row number from updatedRange - this is the fastest way
+      let rowNumber = null;
+      if (appendResult.updates?.updatedRange) {
+        const updatedRange = appendResult.updates.updatedRange;
+        // Extract row number from range like "SheetName!A123:G123" or "'SheetName'!A123:G123"
+        const match = updatedRange.match(/!A(\d+):/i);
+        if (match) {
+          rowNumber = parseInt(match[1]);
+        }
+      }
+      
+      // Update column Z with domPath data asynchronously (don't block)
+      // This allows the main append to complete quickly
+      if (rowNumber && (logData.domPath || logData.startOffset != null || logData.endOffset != null)) {
+        // Update column Z asynchronously without blocking
+        (async () => {
+          try {
+            const sheetIdForUpdate = await getSheetIdByName(sheetId, sheetName, accessToken);
+            if (sheetIdForUpdate != null) {
+              const domPathData = {
+                domPath: logData.domPath || '',
+                startOffset: logData.startOffset != null ? logData.startOffset : null,
+                endOffset: logData.endOffset != null ? logData.endOffset : null
+              };
+              
+              const batchUpdateUrl = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}:batchUpdate`;
+              const updateRequestBody = {
+                requests: [{
+                  updateCells: {
+                    range: {
+                      sheetId: sheetIdForUpdate,
+                      startRowIndex: rowNumber - 1,
+                      endRowIndex: rowNumber,
+                      startColumnIndex: 25,
+                      endColumnIndex: 26
+                    },
+                    rows: [{
+                      values: [{
+                        userEnteredValue: {
+                          stringValue: JSON.stringify(domPathData)
+                        }
+                      }]
+                    }],
+                    fields: 'userEnteredValue'
+                  }
+                }]
+              };
+              
+              await fetch(batchUpdateUrl, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${accessToken}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(updateRequestBody)
+              });
+            }
+          } catch (error) {
+            // Silent fail - updating column Z is not critical
+            console.error('Error updating column Z:', error);
+          }
+        })();
       }
     }
     
