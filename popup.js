@@ -562,7 +562,7 @@ function displayReviewWords(words) {
           </div>
         </div>
         <div style="display: flex; gap: 4px;">
-          <button class="review-btn knew" data-word="${word.word}" style="
+          <button class="review-btn knew" data-word="${word.word}" data-url="${word.url || ''}" style="
             width: 28px;
             height: 28px;
             background: #4CAF50;
@@ -576,7 +576,7 @@ function displayReviewWords(words) {
             font-size: 14px;
             transition: all 0.2s ease;
           " title="Tôi Biết">✓</button>
-          <button class="review-btn didnt-know" data-word="${word.word}" style="
+          <button class="review-btn didnt-know" data-word="${word.word}" data-url="${word.url || ''}" style="
             width: 28px;
             height: 28px;
             background: #f44336;
@@ -601,6 +601,7 @@ function displayReviewWords(words) {
   container.querySelectorAll('.review-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
       const word = e.target.dataset.word;
+      const wordUrl = e.target.dataset.url || '';
       const isKnew = e.target.classList.contains('knew');
       
       // Update review stats
@@ -618,8 +619,16 @@ function displayReviewWords(words) {
         knew: isKnew
       });
       
-      // Log to Google Sheets
-      logToGoogleSheets('review', word, {knew: isKnew});
+      // Log to Google Sheets with URL
+      chrome.runtime.sendMessage({
+        action: 'logToSheets',
+        logData: {
+          action: 'review',
+          word: word,
+          url: wordUrl,
+          knew: isKnew
+        }
+      });
       
       // Remove the word from display
       e.target.closest('div[style*="background: white"]').remove();

@@ -314,8 +314,11 @@ async function logToGoogleSheetsDirectly(sheetUrl, sheetName, logData) {
       await deleteWordFromSheet(sheetId, encodedSheetName, accessToken, logData.word, logData.url);
     } else if (logData.action === 'delete_all') {
       await deleteWordsFromUrl(sheetId, encodedSheetName, accessToken, logData.url);
+    } else if (logData.action === 'review') {
+      // Update review count in column H instead of creating new row
+      await updateReviewCountInSheet(sheetId, sheetName, encodedSheetName, accessToken, logData.word, logData.url);
     } else {
-      // First append main data to columns A-G
+      // First append main data to columns A-H (H = review count, default = 0 for new words)
       const rowData = [
         logData.word || '',
         logData.pronunciation || '',
@@ -323,11 +326,12 @@ async function logToGoogleSheetsDirectly(sheetUrl, sheetName, logData) {
         logData.translation || '',
         logData.example || '',
         logData.url || '',
-        logData.timestamp || ''
+        logData.timestamp || '',
+        0 // Column H: review count, default = 0 for new words
       ];
       
       const values = [rowData];
-      const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodedSheetName}!A:G:append?valueInputOption=USER_ENTERED`;
+      const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodedSheetName}!A:H:append?valueInputOption=USER_ENTERED`;
       
       const sheetsResponse = await fetch(appendUrl, {
         method: 'POST',
@@ -422,6 +426,127 @@ async function logToGoogleSheetsDirectly(sheetUrl, sheetName, logData) {
     return true;
   } catch (error) {
     console.error('Error in logToGoogleSheetsDirectly:', error);
+    throw error;
+  }
+}
+
+async function updateReviewCountInSheet(spreadsheetId, sheetName, encodedSheetName, accessToken, wordToFind, urlToFind) {
+  try {
+    // Read all data from sheet to find the row
+    const readResponse = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodedSheetName}!A:H`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    if (!readResponse.ok) {
+      throw new Error('Failed to read sheet data');
+    }
+    
+    const readData = await readResponse.json();
+    const rows = readData.values || [];
+    
+    if (rows.length === 0) {
+      console.log('Sheet is empty, cannot update review count');
+      return;
+    }
+    
+    // Check if first row is header row
+    let startIdx = 0;
+    if (rows.length > 0 && rows[0][0]) {
+      const firstCell = rows[0][0].toLowerCase().trim();
+      if (firstCell === 'new word' || firstCell === 'từ' || firstCell === 'word' || firstCell === 'từ mới') {
+        startIdx = 1;
+      }
+    }
+    
+    // Find the row containing the word (column A = index 0, column F = index 5 for URL)
+    let rowIndex = -1;
+    const wordToFindLower = wordToFind.toLowerCase().trim();
+    const urlToFindTrimmed = urlToFind ? urlToFind.trim() : '';
+    
+    for (let i = startIdx; i < rows.length; i++) {
+      const row = rows[i];
+      const sheetWord = row[0] ? row[0].toLowerCase().trim() : '';
+      const sheetUrl = row[5] ? row[5].trim() : '';
+      
+      if (sheetWord === wordToFindLower && sheetUrl === urlToFindTrimmed) {
+        rowIndex = i;
+        break;
+      }
+    }
+    
+    if (rowIndex === -1) {
+      console.log(`Word "${wordToFind}" with URL "${urlToFind}" not found in sheet, cannot update review count`);
+      return;
+    }
+    
+    // Get current review count from column H (index 7)
+    // Default to 0 if column H is empty or not a valid number
+    let currentCount = 0;
+    if (rows[rowIndex][7] !== undefined && rows[rowIndex][7] !== null && rows[rowIndex][7] !== '') {
+      const countValue = rows[rowIndex][7];
+      // Try to parse as number, if it's a string number
+      const parsedCount = parseInt(countValue);
+      if (!isNaN(parsedCount)) {
+        currentCount = parsedCount;
+      }
+      // If parsing fails, default to 0
+    }
+    // If column H is empty/null/undefined, currentCount stays 0 (default)
+    
+    // Increment review count
+    const newCount = currentCount + 1;
+    
+    // Get sheet ID for batch update
+    const sheetIdForUpdate = await getSheetIdByName(spreadsheetId, sheetName, accessToken);
+    if (sheetIdForUpdate == null) {
+      throw new Error('Không tìm thấy sheetId cho sheetName: ' + sheetName);
+    }
+    
+    // Update column H (index 7) with new review count
+    const batchUpdateUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`;
+    const updateRequestBody = {
+      requests: [{
+        updateCells: {
+          range: {
+            sheetId: sheetIdForUpdate,
+            startRowIndex: rowIndex,
+            endRowIndex: rowIndex + 1,
+            startColumnIndex: 7, // Column H
+            endColumnIndex: 8
+          },
+          rows: [{
+            values: [{
+              userEnteredValue: {
+                numberValue: newCount
+              }
+            }]
+          }],
+          fields: 'userEnteredValue'
+        }
+      }]
+    };
+    
+    const updateResponse = await fetch(batchUpdateUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(updateRequestBody)
+    });
+    
+    if (!updateResponse.ok) {
+      const errorData = await updateResponse.json();
+      throw new Error(`Failed to update review count: ${errorData.error?.message || 'Unknown error'}`);
+    }
+    
+    console.log(`Updated review count for word "${wordToFind}" to ${newCount}`);
+  } catch (error) {
+    console.error('Error updating review count in sheet:', error);
     throw error;
   }
 }
