@@ -130,8 +130,8 @@ function initializeColorPicker() {
 }
 
 function initializeControls() {
-  // Load default settings from file first
-  loadDefaultSettings();
+  // Initialize default settings only if not already set
+  initializeDefaultSettingsIfNeeded();
   
   // Then load current settings
   loadSettings();
@@ -297,6 +297,16 @@ function initializeControls() {
         if (importSettingsBtn) {
           importSettingsBtn.addEventListener('click', () => {
             document.getElementById('settingsFile').click();
+          });
+        }
+        
+        // Reset to default button
+        const resetToDefaultBtn = document.getElementById('resetToDefault');
+        if (resetToDefaultBtn) {
+          resetToDefaultBtn.addEventListener('click', () => {
+            if (confirm('Bạn có chắc muốn reset về mặc định từ file settings.json? Tất cả cài đặt hiện tại sẽ bị ghi đè.')) {
+              loadDefaultSettingsFromFile();
+            }
           });
         }
         
@@ -934,7 +944,7 @@ function exportSettingsToFile() {
     'selectedSheetId'
   ], (result) => {
     const settings = {
-      shortcutSettings: result.shortcutSettings || {modifier: 'alt', key: 'h'},
+      shortcutSettings: result.shortcutSettings || {modifier: 'alt', key: 'f'},
       highlightColor: result.highlightColor || '#FFEB3B',
       wordCount: result.wordCount || 5,
       wordFilterMode: result.wordFilterMode || 'current',
@@ -992,12 +1002,12 @@ function importSettingsFromFile(file) {
   reader.readAsText(file);
 }
 
-// Load settings from settings.json file
-function loadDefaultSettings() {
+// Load default settings from settings.json file (force reload)
+function loadDefaultSettingsFromFile() {
   fetch(chrome.runtime.getURL('settings.json'))
     .then(response => response.json())
     .then(fileSettings => {
-      // Always load settings from file (override existing)
+      // Force load settings from file (override existing)
       chrome.storage.local.set({
         shortcutSettings: fileSettings.shortcutSettings,
         highlightColor: fileSettings.highlightColor,
@@ -1012,20 +1022,108 @@ function loadDefaultSettings() {
           action: 'updateShortcut',
           shortcut: fileSettings.shortcutSettings
         });
+        
+        // Reload UI
+        loadSettings();
+        showNotification('Đã reset về mặc định từ settings.json!');
       });
     })
     .catch(error => {
-      // If file doesn't exist, use hardcoded defaults
+      console.error('Error loading default settings:', error);
+      showNotification('Lỗi khi load settings.json. Sử dụng giá trị mặc định.', 'error');
+      // Use hardcoded defaults
       chrome.storage.local.set({
-        shortcutSettings: {modifier: 'alt', key: 'h'},
+        shortcutSettings: {modifier: 'alt', key: 'f'},
         highlightColor: '#FFEB3B',
         wordCount: 5,
         wordFilterMode: 'current',
         sheetUrl: 'https://docs.google.com/spreadsheets/d/1LTnXrNzm-MM6a5ElqhwUqNa70wsOVNJI2Wr7zGwZwb0/edit',
         sheetName: '',
         selectedSheetId: ''
+      }, () => {
+        loadSettings();
       });
     });
+}
+
+// Initialize default settings only if not already set in storage
+function initializeDefaultSettingsIfNeeded() {
+  chrome.storage.local.get(['shortcutSettings', 'highlightColor', 'wordCount', 'wordFilterMode', 'sheetUrl', 'sheetName', 'selectedSheetId'], (result) => {
+    // Check if settings already exist
+    const hasSettings = result.shortcutSettings && result.highlightColor && result.wordCount !== undefined;
+    
+    if (!hasSettings) {
+      // Only load defaults if settings don't exist
+      fetch(chrome.runtime.getURL('settings.json'))
+        .then(response => response.json())
+        .then(fileSettings => {
+          // Set default settings from file only if not already set
+          const settingsToSet = {};
+          if (!result.shortcutSettings) {
+            settingsToSet.shortcutSettings = fileSettings.shortcutSettings;
+          }
+          if (!result.highlightColor) {
+            settingsToSet.highlightColor = fileSettings.highlightColor;
+          }
+          if (result.wordCount === undefined) {
+            settingsToSet.wordCount = fileSettings.wordCount;
+          }
+          if (!result.wordFilterMode) {
+            settingsToSet.wordFilterMode = fileSettings.wordFilterMode || 'current';
+          }
+          if (!result.sheetUrl) {
+            settingsToSet.sheetUrl = fileSettings.sheetUrl || 'https://docs.google.com/spreadsheets/d/1LTnXrNzm-MM6a5ElqhwUqNa70wsOVNJI2Wr7zGwZwb0/edit';
+          }
+          if (!result.sheetName) {
+            settingsToSet.sheetName = fileSettings.sheetName || '';
+          }
+          if (!result.selectedSheetId) {
+            settingsToSet.selectedSheetId = fileSettings.selectedSheetId || '';
+          }
+          
+          if (Object.keys(settingsToSet).length > 0) {
+            chrome.storage.local.set(settingsToSet, () => {
+              // Send shortcut to content script if it was set
+              if (settingsToSet.shortcutSettings) {
+                sendMessageToContentScript({
+                  action: 'updateShortcut',
+                  shortcut: settingsToSet.shortcutSettings
+                });
+              }
+            });
+          }
+        })
+        .catch(error => {
+          // If file doesn't exist, use hardcoded defaults only for missing settings
+          const settingsToSet = {};
+          if (!result.shortcutSettings) {
+            settingsToSet.shortcutSettings = {modifier: 'alt', key: 'f'};
+          }
+          if (!result.highlightColor) {
+            settingsToSet.highlightColor = '#FFEB3B';
+          }
+          if (result.wordCount === undefined) {
+            settingsToSet.wordCount = 5;
+          }
+          if (!result.wordFilterMode) {
+            settingsToSet.wordFilterMode = 'current';
+          }
+          if (!result.sheetUrl) {
+            settingsToSet.sheetUrl = 'https://docs.google.com/spreadsheets/d/1LTnXrNzm-MM6a5ElqhwUqNa70wsOVNJI2Wr7zGwZwb0/edit';
+          }
+          if (!result.sheetName) {
+            settingsToSet.sheetName = '';
+          }
+          if (!result.selectedSheetId) {
+            settingsToSet.selectedSheetId = '';
+          }
+          
+          if (Object.keys(settingsToSet).length > 0) {
+            chrome.storage.local.set(settingsToSet);
+          }
+        });
+    }
+  });
 }
 
 // Initialize Google Sheets API
@@ -1083,7 +1181,7 @@ function extractSheetId(url) {
 function loadSettings() {
   chrome.storage.local.get(['shortcutSettings', 'highlightColor', 'wordCount', 'sheetUrl', 'sheetName'], (result) => {
     // Load shortcut settings
-    const settings = result.shortcutSettings || {modifier: 'alt', key: 'h'};
+    const settings = result.shortcutSettings || {modifier: 'alt', key: 'f'};
     document.getElementById('modifierKey').value = settings.modifier;
     document.getElementById('shortcutKey').value = settings.key.toUpperCase();
     updateShortcutStatus(settings.modifier, settings.key);

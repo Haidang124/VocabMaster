@@ -16,7 +16,7 @@ chrome.runtime.onInstalled.addListener(() => {
           highlightColor: '#FFEB3B',
           sheetUrl: 'https://docs.google.com/spreadsheets/d/1esJJVzgowqyY8YXeps4fN3acToqpMuETkdP1JsJbQeI/edit?usp=sharing',
           sheetName: 'Newword',
-          shortcutSettings: {modifier: 'alt', key: 'h'},
+          shortcutSettings: {modifier: 'alt', key: 'f'},
           reviewStats: {
             totalReviewed: 0,
             lastReviewDate: null,
@@ -216,43 +216,44 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             
             const dictResult = await fetchDictionaryDefinition(request.word);
             
-            if (dictResult) {
-              chrome.storage.local.get(['highlightedWords', 'sheetUrl', 'sheetName'], async (result) => {
-                const words = result.highlightedWords || [];
-                const wordIndex = words.findIndex(w => w.word === request.word && w.url === request.url);
-                
-                if (wordIndex !== -1) {
-                  if (!words[wordIndex].meaning) words[wordIndex].meaning = dictResult.meaning;
-                  if (!words[wordIndex].pronunciation && dictResult.pronunciation) words[wordIndex].pronunciation = dictResult.pronunciation;
-                  if (!words[wordIndex].pos && dictResult.pos) words[wordIndex].pos = dictResult.pos;
-                  if (!words[wordIndex].translation && dictResult.translation) words[wordIndex].translation = dictResult.translation;
-                  if (!words[wordIndex].example && dictResult.example) words[wordIndex].example = dictResult.example;
-                  chrome.storage.local.set({highlightedWords: words});
+            chrome.storage.local.get(['highlightedWords', 'sheetUrl', 'sheetName'], async (result) => {
+              const words = result.highlightedWords || [];
+              const wordIndex = words.findIndex(w => w.word === request.word && w.url === request.url);
+              
+              // Update storage with dictionary data if available
+              if (dictResult && wordIndex !== -1) {
+                if (!words[wordIndex].meaning) words[wordIndex].meaning = dictResult.meaning;
+                if (!words[wordIndex].pronunciation && dictResult.pronunciation) words[wordIndex].pronunciation = dictResult.pronunciation;
+                if (!words[wordIndex].pos && dictResult.pos) words[wordIndex].pos = dictResult.pos;
+                if (!words[wordIndex].translation && dictResult.translation) words[wordIndex].translation = dictResult.translation;
+                if (!words[wordIndex].example && dictResult.example) words[wordIndex].example = dictResult.example;
+                chrome.storage.local.set({highlightedWords: words});
+              }
+              
+              // Always save to sheet, even if dictResult is null
+              if (result.sheetUrl && result.sheetName) {
+                const wordInStorage = wordIndex !== -1 ? words[wordIndex] : null;
+                const sheetData = {
+                  action: 'add',
+                  word: request.word,
+                  pronunciation: dictResult?.pronunciation || '',
+                  pos: dictResult?.pos || '',
+                  translation: dictResult?.translation || '',
+                  example: dictResult?.example || '',
+                  url: request.url,
+                  timestamp: new Date().toLocaleString(),
+                  domPath: wordInStorage?.domPath || '',
+                  startOffset: wordInStorage?.startOffset != null ? wordInStorage.startOffset : null,
+                  endOffset: wordInStorage?.endOffset != null ? wordInStorage.endOffset : null
+                };
+                try {
+                  await logToGoogleSheetsDirectly(result.sheetUrl, result.sheetName, sheetData);
+                } catch (err) {
+                  console.error('Error updating Google Sheet with dictionary data:', err);
                 }
-                
-                if (result.sheetUrl && result.sheetName) {
-                  const wordInStorage = words[wordIndex];
-                  const sheetData = {
-                    action: 'add',
-                    word: request.word,
-                    pronunciation: dictResult.pronunciation || '',
-                    pos: dictResult.pos || '',
-                    translation: dictResult.translation || '',
-                    example: dictResult.example || '',
-                    url: request.url,
-                    timestamp: new Date().toLocaleString(),
-                    domPath: wordInStorage?.domPath || '',
-                    startOffset: wordInStorage?.startOffset != null ? wordInStorage.startOffset : null,
-                    endOffset: wordInStorage?.endOffset != null ? wordInStorage.endOffset : null
-                  };
-                  try {
-                    await logToGoogleSheetsDirectly(result.sheetUrl, result.sheetName, sheetData);
-                  } catch (err) {
-                    console.error('Error updating Google Sheet with dictionary data:', err);
-                  }
-                }
-              });
-            }
+              }
+            });
+            
             sendResponse({success: true, meaning: dictResult});
           })();
           return true;

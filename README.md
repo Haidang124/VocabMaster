@@ -6,7 +6,7 @@ Extension Chrome để học từ vựng tiếng Anh với các tính năng high
 
 ### 1. Highlight từ vựng
 - **Double-click** vào từ bất kỳ trên trang web để chọn từ
-- **Nhấn Alt+H** để highlight và lưu từ đã chọn
+- **Nhấn Alt+F** để highlight và lưu từ đã chọn
 - Từ được highlight sẽ được bôi đậm với màu sắc tùy chọn
 - Tự động lưu từ mới vào Google Sheets (nếu đã cấu hình)
 
@@ -42,7 +42,7 @@ Extension Chrome để học từ vựng tiếng Anh với các tính năng high
 4. Extension sẽ xuất hiện trong thanh công cụ
 
 ### Sử dụng cơ bản
-1. **Highlight từ**: Double-click vào từ → Nhấn Alt+H
+1. **Highlight từ**: Double-click vào từ → Nhấn Alt+F
 2. **Mở popup**: Click vào icon extension trên thanh công cụ
 3. **Chọn màu**: Click vào màu trong phần color picker
 4. **Cấu hình Google Sheets**: Nhập URL sheet và click "Lưu URL Sheet"
@@ -69,7 +69,7 @@ Extension Chrome để học từ vựng tiếng Anh với các tính năng high
 
 ## Phím tắt
 
-- **Alt+H**: Highlight từ đã chọn (double-click)
+- **Alt+F**: Highlight từ đã chọn (double-click)
 
 ## Lưu ý
 

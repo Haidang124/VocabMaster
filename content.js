@@ -3,7 +3,7 @@ let isHighlightMode = false; // Mặc định tắt highlight mode để không 
 let selectedWord = null;
 let selectedRange = null;
 let highlightColor = '#FFEB3B';
-let shortcutSettings = {modifier: 'alt', key: 'h'}; // Default shortcut
+let shortcutSettings = {modifier: 'alt', key: 'f'}; // Default shortcut
 
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {

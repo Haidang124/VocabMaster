@@ -39,7 +39,7 @@
   "commands": {
     "highlight-word": {
       "suggested_key": {
-        "default": "Alt+H"
+        "default": "Alt+F"
       },
       "description": "Highlight selected word"
     }
