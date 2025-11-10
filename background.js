@@ -271,35 +271,40 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 chrome.storage.local.set({highlightedWords: words});
               }
               
-              // Update sheet: if word exists, only update audio (columns I, J); otherwise add new row
+              // Update sheet: check if word exists in sheet, if not add it, if yes update audio
               if (result.sheetUrl && result.sheetName) {
-                // Check if word already exists in sheet
-                const wordExists = wordIndex !== -1;
+                // Check if word exists in storage
+                const wordExistsInStorage = wordIndex !== -1;
                 
-                if (wordExists && (wordAudioUrlUS || wordAudioUrlUK)) {
-                  // Word exists, only update audio columns I and J
-                  try {
-                    await updateAudioInSheet(result.sheetUrl, result.sheetName, request.word, request.url, wordAudioUrlUS, wordAudioUrlUK);
-                  } catch (err) {
-                    console.error('Error updating audio in Google Sheet:', err);
+                // Check if word already exists in sheet
+                const existsInSheet = await wordExistsInSheet(result.sheetUrl, result.sheetName, request.word, request.url);
+                
+                if (existsInSheet) {
+                  // Word already exists in sheet, only update audio if we have new audio
+                  if (wordAudioUrlUS || wordAudioUrlUK) {
+                    try {
+                      await updateAudioInSheet(result.sheetUrl, result.sheetName, request.word, request.url, wordAudioUrlUS, wordAudioUrlUK);
+                    } catch (err) {
+                      console.error('Error updating audio in Google Sheet:', err);
+                    }
                   }
-                } else if (!wordExists) {
-                  // Word doesn't exist, add new row
-                  const wordInStorage = wordIndex !== -1 ? words[wordIndex] : null;
+                } else {
+                  // Word doesn't exist in sheet, add new row
+                  const wordInStorage = wordExistsInStorage ? words[wordIndex] : null;
                   const sheetData = {
                     action: 'add',
                     word: request.word,
-                    pronunciation: dictResult?.pronunciation || '',
-                    pos: dictResult?.pos || '',
-                    translation: dictResult?.translation || '',
-                    example: dictResult?.example || '',
+                    pronunciation: dictResult?.pronunciation || wordInStorage?.pronunciation || '',
+                    pos: dictResult?.pos || wordInStorage?.pos || '',
+                    translation: dictResult?.translation || wordInStorage?.translation || '',
+                    example: dictResult?.example || wordInStorage?.example || '',
                     url: request.url,
                     timestamp: new Date().toLocaleString(),
                     domPath: wordInStorage?.domPath || '',
                     startOffset: wordInStorage?.startOffset != null ? wordInStorage.startOffset : null,
                     endOffset: wordInStorage?.endOffset != null ? wordInStorage.endOffset : null,
-                    wordAudioUrlUS: wordAudioUrlUS || '', // Column I: US audio
-                    wordAudioUrlUK: wordAudioUrlUK || '' // Column J: UK audio
+                    wordAudioUrlUS: wordAudioUrlUS || wordInStorage?.wordAudioUrlUS || '', // Column I: US audio
+                    wordAudioUrlUK: wordAudioUrlUK || wordInStorage?.wordAudioUrlUK || '' // Column J: UK audio
                     // Note: Example audio URL không lưu vào sheet, sẽ generate khi cần
                   };
                   try {
@@ -766,6 +771,86 @@ async function logToGoogleSheetsDirectly(sheetUrl, sheetName, logData) {
   } catch (error) {
     console.error('Error in logToGoogleSheetsDirectly:', error);
     throw error;
+  }
+}
+
+// Check if word exists in sheet
+async function wordExistsInSheet(sheetUrl, sheetName, wordToFind, urlToFind) {
+  try {
+    const response = await fetch(chrome.runtime.getURL('vocabmaster.json'));
+    const credentials = await response.json();
+    
+    const jwt = await createJWT(credentials);
+    
+    const tokenResponse = await fetch(credentials.token_uri, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`
+    });
+    
+    const tokenData = await tokenResponse.json();
+    
+    if (tokenData.error) {
+      return false; // If error, assume word doesn't exist
+    }
+    
+    const accessToken = tokenData.access_token;
+    const sheetId = extractSheetId(sheetUrl);
+    if (!sheetId) {
+      return false;
+    }
+    
+    const encodedSheetName = encodeURIComponent(sheetName);
+    
+    // Read all data from sheet to find the word
+    const readResponse = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodedSheetName}!A:J`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    if (!readResponse.ok) {
+      return false;
+    }
+    
+    const readData = await readResponse.json();
+    const rows = readData.values || [];
+    
+    if (rows.length === 0) {
+      return false;
+    }
+    
+    // Check if first row is header row
+    let startIdx = 0;
+    if (rows.length > 0 && rows[0][0]) {
+      const firstCell = rows[0][0].toLowerCase().trim();
+      if (firstCell === 'new word' || firstCell === 'từ' || firstCell === 'word' || firstCell === 'từ mới') {
+        startIdx = 1;
+      }
+    }
+    
+    // Find the row containing the word
+    const wordToFindLower = wordToFind.toLowerCase().trim();
+    const urlToFindTrimmed = urlToFind ? urlToFind.trim() : '';
+    
+    for (let i = startIdx; i < rows.length; i++) {
+      const row = rows[i];
+      const sheetWord = row[0] ? row[0].toLowerCase().trim() : '';
+      const sheetUrl = row[5] ? row[5].trim() : '';
+      
+      if (sheetWord === wordToFindLower && sheetUrl === urlToFindTrimmed) {
+        return true; // Word exists in sheet
+      }
+    }
+    
+    return false; // Word not found in sheet
+  } catch (error) {
+    console.error('Error checking if word exists in sheet:', error);
+    return false; // If error, assume word doesn't exist
   }
 }
 
