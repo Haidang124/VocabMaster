@@ -14,11 +14,13 @@
   "host_permissions": [
     "https://sheets.googleapis.com/*",
     "https://www.googleapis.com/*",
-    "https://dictionary-api.eliaschen.dev/*"
+    "https://dictionary-api.eliaschen.dev/*",
+    "https://api.voicerss.org/*",
+    "https://dictionary.cambridge.org/*"
   ],
   "web_accessible_resources": [
     {
-      "resources": ["vocabmaster.json"],
+      "resources": ["vocabmaster.json", "player.html"],
       "matches": ["<all_urls>"]
     }
   ],

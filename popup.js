@@ -23,6 +23,16 @@ function saveWordFilterMode(mode) {
   updateFilterButtons();
 }
 
+// Flashcard variables
+let flashcardWords = [];
+let currentFlashcardIndex = 0;
+let flashcardMode = 'word'; // 'word' or 'audio'
+let flashcardStats = { total: 0, current: 0, knew: 0 };
+let isPlayingWordAudio = false;
+let isPlayingExampleAudio = false;
+let currentWordAudioElement = null;
+let currentExampleAudioElement = null;
+
 // Initialize popup
 document.addEventListener('DOMContentLoaded', () => {
   // Wait a bit to ensure all elements are loaded
@@ -32,6 +42,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initializeControls();
   initializeWordList();
   initializeReview();
+  initializeFlashcard();
   loadWords();
     
     // Listen for word deletion from content script
@@ -74,6 +85,10 @@ function initializeTabs() {
         });
       } else if (tabName === 'review') {
         loadReviewWords();
+      } else if (tabName === 'flashcard') {
+        initializeFlashcard();
+        // Auto-load words from sheet when opening flashcard tab
+        loadFlashcardWords();
       } else if (tabName === 'settings') {
         // Load settings when switching to settings tab
         loadSettings();
@@ -188,6 +203,77 @@ function initializeControls() {
   document.getElementById('rollWords').addEventListener('click', () => {
     loadReviewWords();
   });
+  
+  // Save VoiceRSS API Key button
+  // Reload MP3 button
+  const reloadMP3Btn = document.getElementById('reloadMP3');
+  const reloadMP3Status = document.getElementById('reloadMP3Status');
+  if (reloadMP3Btn) {
+    reloadMP3Btn.addEventListener('click', () => {
+      chrome.storage.local.get(['sheetUrl', 'sheetName', 'voicerssApiKey'], (result) => {
+        if (!result.sheetUrl || !result.sheetName) {
+          showNotification('Vui lòng cấu hình Google Sheets trước!', 'error');
+          return;
+        }
+        if (!result.voicerssApiKey) {
+          showNotification('Vui lòng nhập VoiceRSS API Key trước!', 'error');
+          return;
+        }
+        
+        // Disable button and show status
+        reloadMP3Btn.disabled = true;
+        reloadMP3Btn.textContent = '⏳ Đang xử lý...';
+        reloadMP3Status.style.display = 'block';
+        reloadMP3Status.textContent = '⏳ Đang quét sheet và tạo audio...';
+        reloadMP3Status.style.color = '#666';
+        
+        // Send message to background script
+        chrome.runtime.sendMessage({
+          action: 'reloadMP3ForAllWords',
+          sheetUrl: result.sheetUrl,
+          sheetName: result.sheetName,
+          voicerssApiKey: result.voicerssApiKey
+        }, (response) => {
+          if (chrome.runtime.lastError) {
+            reloadMP3Btn.disabled = false;
+            reloadMP3Btn.textContent = '🔄 Reload MP3 (Quét & Tạo Audio)';
+            reloadMP3Status.textContent = '❌ Lỗi: ' + chrome.runtime.lastError.message;
+            reloadMP3Status.style.color = '#f44336';
+            return;
+          }
+          
+          if (response && response.success) {
+            reloadMP3Btn.disabled = false;
+            reloadMP3Btn.textContent = '🔄 Reload MP3 (Quét & Tạo Audio)';
+            reloadMP3Status.textContent = `✅ Hoàn thành! Đã xử lý ${response.processed || 0} từ, tạo ${response.generated || 0} audio.`;
+            reloadMP3Status.style.color = '#4CAF50';
+            showNotification(`Đã reload MP3: ${response.processed || 0} từ, ${response.generated || 0} audio mới.`);
+          } else {
+            reloadMP3Btn.disabled = false;
+            reloadMP3Btn.textContent = '🔄 Reload MP3 (Quét & Tạo Audio)';
+            reloadMP3Status.textContent = '❌ Lỗi: ' + (response?.error || 'Không thể reload MP3');
+            reloadMP3Status.style.color = '#f44336';
+          }
+        });
+      });
+    });
+  }
+  
+  const saveVoicerssApiKeyBtn = document.getElementById('saveVoicerssApiKey');
+  if (saveVoicerssApiKeyBtn) {
+    saveVoicerssApiKeyBtn.addEventListener('click', () => {
+      const apiKey = document.getElementById('voicerssApiKey').value.trim();
+      
+      if (!apiKey) {
+        showNotification('Vui lòng nhập VoiceRSS API Key', 'error');
+        return;
+      }
+      
+      chrome.storage.local.set({voicerssApiKey: apiKey}, () => {
+        showNotification('Đã lưu VoiceRSS API Key!');
+      });
+    });
+  }
   
   // Reload from Sheet button
   const reloadFromSheetBtn = document.getElementById('reloadFromSheet');
@@ -385,6 +471,967 @@ function initializeReview() {
   didntKnowBtn.addEventListener('click', () => {
     handleReviewResponse(false);
   });
+}
+
+function initializeFlashcard() {
+  const modeWordBtn = document.getElementById('flashcardModeWord');
+  const modeAudioBtn = document.getElementById('flashcardModeAudio');
+  const startBtn = document.getElementById('startFlashcard');
+  const knewBtn = document.getElementById('flashcardKnew');
+  const nextBtn = document.getElementById('flashcardNext');
+  
+  if (modeWordBtn) {
+    modeWordBtn.addEventListener('click', () => {
+      flashcardMode = 'word';
+      updateFlashcardModeButtons();
+      // Reload current card with new mode (keep same word)
+      if (flashcardWords.length > 0 && currentFlashcardIndex < flashcardWords.length) {
+        displayFlashcard();
+      }
+    });
+  }
+  
+  if (modeAudioBtn) {
+    modeAudioBtn.addEventListener('click', () => {
+      flashcardMode = 'audio';
+      updateFlashcardModeButtons();
+      // Reload current card with new mode (keep same word)
+      if (flashcardWords.length > 0 && currentFlashcardIndex < flashcardWords.length) {
+        displayFlashcard();
+      }
+    });
+  }
+  
+  if (startBtn) {
+    startBtn.addEventListener('click', () => {
+      loadFlashcardWords();
+    });
+  }
+  
+  if (knewBtn) {
+    knewBtn.addEventListener('click', () => {
+      handleFlashcardKnew();
+    });
+  }
+  
+  if (nextBtn) {
+    nextBtn.addEventListener('click', () => {
+      handleFlashcardNext();
+    });
+  }
+  
+  updateFlashcardModeButtons();
+}
+
+function updateFlashcardModeButtons() {
+  const modeWordBtn = document.getElementById('flashcardModeWord');
+  const modeAudioBtn = document.getElementById('flashcardModeAudio');
+  
+  if (modeWordBtn && modeAudioBtn) {
+    if (flashcardMode === 'word') {
+      modeWordBtn.style.background = '#4CAF50';
+      modeWordBtn.style.color = 'white';
+      modeWordBtn.style.fontWeight = 'bold';
+      modeAudioBtn.style.background = '#e0e0e0';
+      modeAudioBtn.style.color = '#666';
+      modeAudioBtn.style.fontWeight = 'normal';
+    } else {
+      modeWordBtn.style.background = '#e0e0e0';
+      modeWordBtn.style.color = '#666';
+      modeWordBtn.style.fontWeight = 'normal';
+      modeAudioBtn.style.background = '#4CAF50';
+      modeAudioBtn.style.color = 'white';
+      modeAudioBtn.style.fontWeight = 'bold';
+    }
+  }
+}
+
+function loadFlashcardWords() {
+  const container = document.getElementById('flashcardContainer');
+  const startBtn = document.getElementById('startFlashcard');
+  const knewBtn = document.getElementById('flashcardKnew');
+  const nextBtn = document.getElementById('flashcardNext');
+  
+  if (container) {
+    container.innerHTML = '<div style="font-size: 14px; color: #666;">Đang tải từ...</div>';
+  }
+  
+  // Get wordCount from settings
+  chrome.storage.local.get(['wordCount'], (result) => {
+    const wordCount = result.wordCount || 5;
+    
+    chrome.runtime.sendMessage({
+      action: 'getRandomWordsForFlashcard',
+      count: wordCount,
+      mode: flashcardMode
+    }, (response) => {
+    if (response && response.words && response.words.length > 0) {
+      flashcardWords = response.words;
+      currentFlashcardIndex = 0;
+      flashcardStats = {
+        total: flashcardWords.length,
+        current: 0,
+        knew: 0
+      };
+      
+      displayFlashcard();
+      
+      if (startBtn) startBtn.style.display = 'none';
+      if (knewBtn) knewBtn.style.display = 'inline-block';
+      if (nextBtn) nextBtn.style.display = 'inline-block';
+    } else {
+      if (container) {
+        container.innerHTML = `
+          <div style="font-size: 14px; color: #666; margin-bottom: 20px;">
+            ${flashcardMode === 'audio' ? 'Không có từ nào có audio. Hãy highlight một số từ trước!' : 'Chưa có từ để học. Hãy highlight một số từ trước!'}
+          </div>
+          <button id="startFlashcard" style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px;">▶️ Bắt Đầu</button>
+        `;
+        document.getElementById('startFlashcard').addEventListener('click', () => {
+          loadFlashcardWords();
+        });
+      }
+    }
+    });
+  });
+}
+
+function displayFlashcard() {
+  const container = document.getElementById('flashcardContainer');
+  const statsDiv = document.getElementById('flashcardStats');
+  
+  // Stop any playing audio when switching cards
+  if (isPlayingWordAudio && currentWordAudioElement) {
+    currentWordAudioElement.pause();
+    currentWordAudioElement = null;
+    isPlayingWordAudio = false;
+    updateWordButtonState(false);
+  }
+  if (isPlayingExampleAudio && currentExampleAudioElement) {
+    currentExampleAudioElement.pause();
+    currentExampleAudioElement = null;
+    isPlayingExampleAudio = false;
+    updateExampleButtonState(false);
+  }
+  
+  if (currentFlashcardIndex >= flashcardWords.length) {
+    // Finished all cards
+    if (container) {
+      container.innerHTML = `
+        <div style="font-size: 18px; color: #4CAF50; margin-bottom: 10px; font-weight: bold;">🎉 Hoàn Thành!</div>
+        <div style="font-size: 14px; color: #666; margin-bottom: 20px;">
+          Đã học: ${flashcardStats.total} từ<br>
+          Đã thuộc: ${flashcardStats.knew} từ
+        </div>
+        <button id="startFlashcard" style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px;">🔄 Bắt Đầu Lại</button>
+      `;
+      document.getElementById('startFlashcard').addEventListener('click', () => {
+        loadFlashcardWords();
+      });
+    }
+    
+    const knewBtn = document.getElementById('flashcardKnew');
+    const nextBtn = document.getElementById('flashcardNext');
+    if (knewBtn) knewBtn.style.display = 'none';
+    if (nextBtn) nextBtn.style.display = 'none';
+    
+    return;
+  }
+  
+  const currentWord = flashcardWords[currentFlashcardIndex];
+  
+  // Check if audio is ready (for audio mode) or word is ready (for word mode)
+  if (flashcardMode === 'audio') {
+    // Check for non-empty strings (handle empty strings from sheet)
+    const hasAudio = (currentWord.wordAudioUrlUS && currentWord.wordAudioUrlUS.trim()) || (currentWord.wordAudioUrlUK && currentWord.wordAudioUrlUK.trim());
+    if (!hasAudio) {
+      // Show loading indicator while generating audio
+      if (container) {
+        container.innerHTML = `
+          <div style="position: relative;">
+            <div id="flashcardCard" style="padding: 40px 20px; border: 2px solid #e0e0e0; border-radius: 12px; text-align: center;">
+              <div style="font-size: 48px; margin-bottom: 20px;">⏳</div>
+              <div style="font-size: 16px; color: #666;">Đang tạo audio...</div>
+            </div>
+          </div>
+        `;
+      }
+      
+      // Generate audio and then display
+      generateAudioForWord(currentWord).then((generatedAudio) => {
+        if (generatedAudio && (generatedAudio.wordAudioUrlUS || generatedAudio.wordAudioUrlUK)) {
+          // Update word object
+          currentWord.wordAudioUrlUS = generatedAudio.wordAudioUrlUS;
+          currentWord.wordAudioUrlUK = generatedAudio.wordAudioUrlUK;
+          // Display the card now that audio is ready
+          displayFlashcard();
+        } else {
+          // Failed to generate audio, show error
+          if (container) {
+            container.innerHTML = `
+              <div style="position: relative;">
+                <div id="flashcardCard" style="padding: 40px 20px; border: 2px solid #e0e0e0; border-radius: 12px; text-align: center;">
+                  <div style="font-size: 48px; margin-bottom: 20px;">⚠️</div>
+                  <div style="font-size: 16px; color: #f44336;">Không thể tạo audio. Vui lòng kiểm tra VoiceRSS API Key.</div>
+                  <button id="skipWordBtn" style="margin-top: 20px; padding: 10px 20px; background: #2196F3; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px;">➡️ Bỏ qua</button>
+                </div>
+              </div>
+            `;
+            const skipBtn = document.getElementById('skipWordBtn');
+            if (skipBtn) {
+              skipBtn.addEventListener('click', () => {
+                handleFlashcardNext();
+              });
+            }
+          }
+        }
+      });
+      return;
+    }
+  }
+  
+  const translation = currentWord.translation || currentWord.meaning || 'Chưa có nghĩa';
+  const example = currentWord.example || '';
+  
+  if (flashcardMode === 'word') {
+    // Word mode: Show word, user guesses meaning
+    if (container) {
+      container.innerHTML = `
+        <div style="position: relative;">
+          <button id="showMeaningBtn" style="position: absolute; top: -10px; right: -10px; width: 28px; height: 28px; background: #2196F3; color: white; border: none; border-radius: 50%; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; transition: all 0.2s; z-index: 10; box-shadow: 0 2px 4px rgba(0,0,0,0.2);" title="Xem nghĩa">👁️</button>
+          <div id="flashcardCard" style="padding: 20px; border: 2px solid #e0e0e0; border-radius: 12px; transition: all 0.3s;">
+            <div style="font-size: 32px; font-weight: bold; color: #333; text-align: center;">${currentWord.word}</div>
+            <div id="flashcardAnswer" style="display: none; font-size: 16px; color: #4CAF50; margin-top: 20px; padding: 15px; background: #f0f8f0; border-radius: 8px;">
+              <div style="font-weight: bold; margin-bottom: 5px;">Nghĩa:</div>
+              <div>${translation}</div>
+              ${example ? `<div style="margin-top: 10px; font-style: italic; color: #666;">${example}</div>` : ''}
+            </div>
+          </div>
+        </div>
+      `;
+      
+      // Add click event to show meaning icon
+      const showBtn = document.getElementById('showMeaningBtn');
+      if (showBtn) {
+        showBtn.addEventListener('click', () => {
+          const answerDiv = document.getElementById('flashcardAnswer');
+          if (answerDiv) {
+            if (answerDiv.style.display === 'none') {
+              answerDiv.style.display = 'block';
+              showBtn.style.background = '#4CAF50';
+              // Play audio when showing meaning
+              playFlashcardWordAudio(currentWord);
+            } else {
+              answerDiv.style.display = 'none';
+              showBtn.style.background = '#2196F3';
+            }
+          }
+        });
+        
+        // Add hover effect
+        showBtn.addEventListener('mouseenter', () => {
+          showBtn.style.transform = 'scale(1.1)';
+        });
+        showBtn.addEventListener('mouseleave', () => {
+          showBtn.style.transform = 'scale(1)';
+        });
+      }
+    }
+  } else {
+    // Audio mode: Play audio, user guesses meaning
+    if (container) {
+      container.innerHTML = `
+        <div style="position: relative;">
+          <button id="showMeaningBtn" style="position: absolute; top: -10px; right: -10px; width: 28px; height: 28px; background: #2196F3; color: white; border: none; border-radius: 50%; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; transition: all 0.2s; z-index: 10; box-shadow: 0 2px 4px rgba(0,0,0,0.2);" title="Xem nghĩa">👁️</button>
+          <div id="flashcardCard" style="padding: 40px 20px; border: 2px solid #e0e0e0; border-radius: 12px; transition: all 0.3s; text-align: center;">
+            <div style="display: flex; gap: 20px; justify-content: center; align-items: center; margin-bottom: 20px;">
+              <button id="playWordAudioBtn" style="width: 80px; height: 80px; background: #2196F3; color: white; border: none; border-radius: 50%; cursor: pointer; font-size: 36px; display: flex; align-items: center; justify-content: center; transition: all 0.2s; box-shadow: 0 4px 12px rgba(33, 150, 243, 0.4);" title="Nghe từ">🔊</button>
+              ${example ? `<button id="playExampleAudioBtn" style="width: 80px; height: 80px; background: #4CAF50; color: white; border: none; border-radius: 50%; cursor: pointer; font-size: 36px; display: flex; align-items: center; justify-content: center; transition: all 0.2s; box-shadow: 0 4px 12px rgba(76, 175, 80, 0.4);" title="Nghe câu">📝</button>` : ''}
+            </div>
+            <div id="flashcardAnswer" style="display: none; font-size: 16px; color: #4CAF50; margin-top: 20px; padding: 15px; background: #f0f8f0; border-radius: 8px;">
+              <div style="font-weight: bold; margin-bottom: 5px;">Từ:</div>
+              <div style="font-size: 20px; margin-bottom: 10px;">${currentWord.word}</div>
+              <div style="font-weight: bold; margin-bottom: 5px;">Nghĩa:</div>
+              <div>${translation}</div>
+              ${example ? `<div style="margin-top: 10px; font-style: italic; color: #666;">${example}</div>` : ''}
+            </div>
+          </div>
+        </div>
+      `;
+      
+      // Play word audio button
+      const playWordBtn = document.getElementById('playWordAudioBtn');
+      if (playWordBtn) {
+        playWordBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (!isPlayingWordAudio) {
+            playFlashcardWordAudio(currentWord);
+          }
+        });
+        
+        // Add hover effect
+        playWordBtn.addEventListener('mouseenter', () => {
+          if (!isPlayingWordAudio) {
+            playWordBtn.style.transform = 'scale(1.1)';
+            playWordBtn.style.boxShadow = '0 6px 16px rgba(33, 150, 243, 0.5)';
+          }
+        });
+        playWordBtn.addEventListener('mouseleave', () => {
+          if (!isPlayingWordAudio) {
+            playWordBtn.style.transform = 'scale(1)';
+            playWordBtn.style.boxShadow = '0 4px 12px rgba(33, 150, 243, 0.4)';
+          }
+        });
+      }
+      
+      // Play example audio button
+      const playExampleBtn = document.getElementById('playExampleAudioBtn');
+      if (playExampleBtn) {
+        playExampleBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (!isPlayingExampleAudio) {
+            playFlashcardExampleAudio(currentWord);
+          }
+        });
+        
+        // Add hover effect
+        playExampleBtn.addEventListener('mouseenter', () => {
+          if (!isPlayingExampleAudio) {
+            playExampleBtn.style.transform = 'scale(1.1)';
+            playExampleBtn.style.boxShadow = '0 6px 16px rgba(76, 175, 80, 0.5)';
+          }
+        });
+        playExampleBtn.addEventListener('mouseleave', () => {
+          if (!isPlayingExampleAudio) {
+            playExampleBtn.style.transform = 'scale(1)';
+            playExampleBtn.style.boxShadow = '0 4px 12px rgba(76, 175, 80, 0.4)';
+          }
+        });
+      }
+      
+      // Show meaning button for audio mode
+      const showBtn = document.getElementById('showMeaningBtn');
+      if (showBtn) {
+        showBtn.addEventListener('click', () => {
+          const answerDiv = document.getElementById('flashcardAnswer');
+          if (answerDiv) {
+            if (answerDiv.style.display === 'none') {
+              answerDiv.style.display = 'block';
+              showBtn.style.background = '#4CAF50';
+              // Play audio when showing meaning
+              playFlashcardWordAudio(currentWord);
+            } else {
+              answerDiv.style.display = 'none';
+              showBtn.style.background = '#2196F3';
+            }
+          }
+        });
+        
+        // Add hover effect
+        showBtn.addEventListener('mouseenter', () => {
+          showBtn.style.transform = 'scale(1.1)';
+        });
+        showBtn.addEventListener('mouseleave', () => {
+          showBtn.style.transform = 'scale(1)';
+        });
+      }
+      
+      // Auto-play word audio when card is shown (only in audio mode)
+      // Use currentWord from currentFlashcardIndex to ensure sync
+      if (flashcardMode === 'audio') {
+        setTimeout(() => {
+          // Get current word again to ensure it's the correct one
+          const wordToPlay = flashcardWords[currentFlashcardIndex];
+          if (wordToPlay && wordToPlay.word === currentWord.word) {
+            playFlashcardWordAudio(wordToPlay);
+          }
+        }, 500);
+      }
+    }
+  }
+  
+  // Update stats
+  if (statsDiv) {
+    statsDiv.textContent = `Tiến độ: ${currentFlashcardIndex + 1}/${flashcardStats.total} | Đã thuộc: ${flashcardStats.knew}`;
+  }
+}
+
+function playFlashcardWordAudio(word) {
+  // Prevent duplicate playback
+  if (isPlayingWordAudio) {
+    return;
+  }
+  
+  // Stop example audio if playing
+  if (isPlayingExampleAudio && currentExampleAudioElement) {
+    currentExampleAudioElement.pause();
+    currentExampleAudioElement = null;
+    isPlayingExampleAudio = false;
+    updateExampleButtonState(false);
+  }
+  
+  // Priority: US audio > UK audio
+  // Check for non-empty strings (handle empty strings from sheet)
+  let audioUrl = (word.wordAudioUrlUS && word.wordAudioUrlUS.trim()) || (word.wordAudioUrlUK && word.wordAudioUrlUK.trim());
+  
+  if (!audioUrl) {
+    // Generate audio immediately if not available
+    showFlashcardNotification('⏳ Đang tạo audio...');
+    generateAudioForWord(word).then((generatedAudio) => {
+      if (generatedAudio && (generatedAudio.wordAudioUrlUS || generatedAudio.wordAudioUrlUK)) {
+        audioUrl = generatedAudio.wordAudioUrlUS || generatedAudio.wordAudioUrlUK;
+        playAudioFromUrl(audioUrl, 'word');
+        showFlashcardNotification('✅ Đã tạo audio!');
+      } else {
+        showFlashcardNotification('⚠️ Không thể tạo audio. Vui lòng kiểm tra VoiceRSS API Key.');
+      }
+    }).catch((error) => {
+      console.error('Error generating audio:', error);
+      showFlashcardNotification('⚠️ Lỗi khi tạo audio. Vui lòng thử lại.');
+    });
+    return;
+  }
+  
+  playAudioFromUrl(audioUrl, 'word');
+}
+
+// Generate audio for a word immediately
+async function generateAudioForWord(word) {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['voicerssApiKey', 'sheetUrl', 'sheetName'], (result) => {
+      if (!result.voicerssApiKey) {
+        resolve(null);
+        return;
+      }
+      
+      // Call fetchDictionary which will handle audio generation
+      chrome.runtime.sendMessage({
+        action: 'fetchDictionary',
+        word: word.word,
+        url: word.url || ''
+      }, async (dictResponse) => {
+        let wordAudioUrlUS = null;
+        let wordAudioUrlUK = null;
+        
+        // Check if dictionary API returned audio
+        if (dictResponse && dictResponse.success && dictResponse.meaning) {
+          wordAudioUrlUS = dictResponse.meaning.wordAudioUrlUS || null;
+          wordAudioUrlUK = dictResponse.meaning.wordAudioUrlUK || null;
+        }
+        
+        // If still no audio, use VoiceRSS
+        if (!wordAudioUrlUS && result.voicerssApiKey) {
+          chrome.runtime.sendMessage({
+            action: 'generateAudio',
+            text: word.word,
+            apiKey: result.voicerssApiKey
+          }, (audioResponse) => {
+            if (audioResponse && audioResponse.success && audioResponse.audioUrl) {
+              wordAudioUrlUS = audioResponse.audioUrl;
+              wordAudioUrlUK = audioResponse.audioUrl; // Use same for UK
+            }
+            
+            // Update word object immediately
+            word.wordAudioUrlUS = wordAudioUrlUS;
+            word.wordAudioUrlUK = wordAudioUrlUK;
+            
+            // Update in storage
+            chrome.storage.local.get(['highlightedWords'], (storageResult) => {
+              const wordsInStorage = storageResult.highlightedWords || [];
+              const wordIndex = wordsInStorage.findIndex(w => w.word === word.word && (w.url === word.url || !word.url));
+              if (wordIndex !== -1) {
+                if (wordAudioUrlUS) wordsInStorage[wordIndex].wordAudioUrlUS = wordAudioUrlUS;
+                if (wordAudioUrlUK) wordsInStorage[wordIndex].wordAudioUrlUK = wordAudioUrlUK;
+                chrome.storage.local.set({highlightedWords: wordsInStorage});
+              }
+            });
+            
+            // Update in Google Sheets if word is from sheet
+            if (word.fromSheet && result.sheetUrl && result.sheetName && (wordAudioUrlUS || wordAudioUrlUK)) {
+              chrome.runtime.sendMessage({
+                action: 'updateAudioInSheet',
+                sheetUrl: result.sheetUrl,
+                sheetName: result.sheetName,
+                word: word.word,
+                url: word.url || '',
+                wordAudioUrlUS: wordAudioUrlUS,
+                wordAudioUrlUK: wordAudioUrlUK
+              });
+            }
+            
+            resolve({
+              wordAudioUrlUS: wordAudioUrlUS,
+              wordAudioUrlUK: wordAudioUrlUK
+            });
+          });
+        } else {
+          // Update word object immediately
+          word.wordAudioUrlUS = wordAudioUrlUS;
+          word.wordAudioUrlUK = wordAudioUrlUK;
+          
+          // Update in storage
+          chrome.storage.local.get(['highlightedWords'], (storageResult) => {
+            const wordsInStorage = storageResult.highlightedWords || [];
+            const wordIndex = wordsInStorage.findIndex(w => w.word === word.word && (w.url === word.url || !word.url));
+            if (wordIndex !== -1) {
+              if (wordAudioUrlUS) wordsInStorage[wordIndex].wordAudioUrlUS = wordAudioUrlUS;
+              if (wordAudioUrlUK) wordsInStorage[wordIndex].wordAudioUrlUK = wordAudioUrlUK;
+              chrome.storage.local.set({highlightedWords: wordsInStorage});
+            }
+          });
+          
+          // Update in Google Sheets if word is from sheet
+          if (word.fromSheet && result.sheetUrl && result.sheetName && (wordAudioUrlUS || wordAudioUrlUK)) {
+            chrome.runtime.sendMessage({
+              action: 'updateAudioInSheet',
+              sheetUrl: result.sheetUrl,
+              sheetName: result.sheetName,
+              word: word.word,
+              url: word.url || '',
+              wordAudioUrlUS: wordAudioUrlUS,
+              wordAudioUrlUK: wordAudioUrlUK
+            });
+          }
+          
+          resolve({
+            wordAudioUrlUS: wordAudioUrlUS,
+            wordAudioUrlUK: wordAudioUrlUK
+          });
+        }
+      });
+    });
+  });
+}
+
+function playFlashcardExampleAudio(word) {
+  // Prevent duplicate playback
+  if (isPlayingExampleAudio) {
+    return;
+  }
+  
+  // Generate example audio from example text
+  if (!word.example || !word.example.trim()) {
+    showFlashcardNotification('⚠️ Từ này chưa có câu ví dụ.');
+    return;
+  }
+  
+  // Stop word audio if playing
+  if (isPlayingWordAudio && currentWordAudioElement) {
+    currentWordAudioElement.pause();
+    currentWordAudioElement = null;
+    isPlayingWordAudio = false;
+    updateWordButtonState(false);
+  }
+  
+  chrome.storage.local.get(['voicerssApiKey'], (result) => {
+    if (result.voicerssApiKey) {
+      const params = new URLSearchParams({
+        key: result.voicerssApiKey,
+        hl: 'en-us',
+        src: word.example.trim(),
+        c: 'MP3',
+        f: '44khz_16bit_stereo',
+        ssml: 'false',
+        b64: 'false'
+      });
+      const audioUrl = `https://api.voicerss.org/?${params.toString()}`;
+      playAudioFromUrl(audioUrl, 'example');
+    } else {
+      console.warn('No VoiceRSS API key for example audio');
+      showFlashcardNotification('⚠️ Chưa có VoiceRSS API Key. Vào Cài Đặt để thêm API Key.');
+    }
+  });
+}
+
+function showFlashcardNotification(message) {
+  const container = document.getElementById('flashcardContainer');
+  if (container) {
+    // Remove existing notification
+    const existing = container.querySelector('.flashcard-notification');
+    if (existing) existing.remove();
+    
+    const notification = document.createElement('div');
+    notification.className = 'flashcard-notification';
+    notification.style.cssText = 'font-size: 12px; color: #f44336; margin-top: 10px; padding: 8px; background: #ffebee; border-radius: 4px; text-align: center;';
+    notification.textContent = message;
+    container.appendChild(notification);
+    setTimeout(() => notification.remove(), 3000);
+  }
+}
+
+function playAudioFromUrl(audioUrl, type = 'word') {
+  if (!audioUrl || !audioUrl.trim()) {
+    console.error('Invalid audio URL:', audioUrl);
+    showFlashcardNotification('⚠️ URL audio không hợp lệ');
+    return;
+  }
+  
+  console.log('Playing audio from URL:', audioUrl, 'Type:', type);
+  
+  // Check if URL is from VoiceRSS (no CORS issue) or Cambridge (CORS issue)
+  const isVoiceRSS = audioUrl.includes('api.voicerss.org');
+  const isCambridge = audioUrl.includes('dictionary.cambridge.org');
+  
+  if (isVoiceRSS) {
+    // VoiceRSS URLs can be played directly
+    playAudioDirectly(audioUrl, type);
+  } else if (isCambridge) {
+    // Cambridge URLs need to be fetched via background script to avoid CORS
+    fetchAudioViaBackground(audioUrl, type);
+  } else {
+    // Try direct first, fallback to background fetch if fails
+    playAudioDirectly(audioUrl, type).catch(() => {
+      console.log('Direct play failed, trying background fetch...');
+      fetchAudioViaBackground(audioUrl, type);
+    });
+  }
+}
+
+function playAudioDirectly(audioUrl, type = 'word') {
+  return new Promise((resolve, reject) => {
+    const audio = new Audio(audioUrl);
+    
+    // Store audio element and set playing state
+    if (type === 'word') {
+      currentWordAudioElement = audio;
+      isPlayingWordAudio = true;
+      updateWordButtonState(true);
+    } else if (type === 'example') {
+      currentExampleAudioElement = audio;
+      isPlayingExampleAudio = true;
+      updateExampleButtonState(true);
+    }
+    
+    // Add event listeners for debugging
+    audio.addEventListener('loadstart', () => {
+      console.log('Audio loading started');
+    });
+    
+    audio.addEventListener('canplay', () => {
+      console.log('Audio can play');
+    });
+    
+    audio.addEventListener('error', (e) => {
+      console.error('Audio error:', e);
+      console.error('Audio error details:', {
+        code: audio.error?.code,
+        message: audio.error?.message,
+        url: audioUrl
+      });
+      
+      // Reset state on error
+      if (type === 'word') {
+        currentWordAudioElement = null;
+        isPlayingWordAudio = false;
+        updateWordButtonState(false);
+      } else if (type === 'example') {
+        currentExampleAudioElement = null;
+        isPlayingExampleAudio = false;
+        updateExampleButtonState(false);
+      }
+      
+      reject(new Error('Audio playback error'));
+    });
+    
+    audio.addEventListener('ended', () => {
+      console.log('Audio playback ended');
+      
+      // Reset state when ended
+      if (type === 'word') {
+        currentWordAudioElement = null;
+        isPlayingWordAudio = false;
+        updateWordButtonState(false);
+      } else if (type === 'example') {
+        currentExampleAudioElement = null;
+        isPlayingExampleAudio = false;
+        updateExampleButtonState(false);
+      }
+      
+      resolve();
+    });
+    
+    // Try to play audio
+    audio.play().then(() => {
+      console.log('Audio playback started successfully');
+      resolve();
+    }).catch((error) => {
+      console.error('Error playing audio:', error);
+      console.error('Error details:', {
+        name: error.name,
+        message: error.message,
+        url: audioUrl
+      });
+      
+      // Reset state on error
+      if (type === 'word') {
+        currentWordAudioElement = null;
+        isPlayingWordAudio = false;
+        updateWordButtonState(false);
+      } else if (type === 'example') {
+        currentExampleAudioElement = null;
+        isPlayingExampleAudio = false;
+        updateExampleButtonState(false);
+      }
+      
+      reject(error);
+    });
+  });
+}
+
+function fetchAudioViaBackground(audioUrl, type = 'word') {
+  console.log('Fetching audio via background script to avoid CORS...');
+  
+  // Set playing state
+  if (type === 'word') {
+    isPlayingWordAudio = true;
+    updateWordButtonState(true);
+  } else if (type === 'example') {
+    isPlayingExampleAudio = true;
+    updateExampleButtonState(true);
+  }
+  
+  // First try to fetch as blob
+  chrome.runtime.sendMessage({
+    action: 'fetchAudioAsBlob',
+    audioUrl: audioUrl
+  }, (response) => {
+    if (chrome.runtime.lastError) {
+      console.error('Error fetching audio:', chrome.runtime.lastError);
+      // Fallback to playing in hidden tab
+      playAudioInHiddenTab(audioUrl, type);
+      return;
+    }
+    
+    if (response && response.success && response.blobUrl) {
+      // Play audio from blob URL (base64 data URL)
+      const audio = new Audio(response.blobUrl);
+      
+      // Store audio element
+      if (type === 'word') {
+        currentWordAudioElement = audio;
+      } else if (type === 'example') {
+        currentExampleAudioElement = audio;
+      }
+      
+      audio.addEventListener('error', (e) => {
+        console.error('Audio playback error:', e);
+        // Reset state
+        if (type === 'word') {
+          currentWordAudioElement = null;
+          isPlayingWordAudio = false;
+          updateWordButtonState(false);
+        } else if (type === 'example') {
+          currentExampleAudioElement = null;
+          isPlayingExampleAudio = false;
+          updateExampleButtonState(false);
+        }
+        // Fallback to playing in hidden tab
+        playAudioInHiddenTab(audioUrl, type);
+      });
+      
+      audio.addEventListener('ended', () => {
+        console.log('Audio playback ended');
+        // Reset state
+        if (type === 'word') {
+          currentWordAudioElement = null;
+          isPlayingWordAudio = false;
+          updateWordButtonState(false);
+        } else if (type === 'example') {
+          currentExampleAudioElement = null;
+          isPlayingExampleAudio = false;
+          updateExampleButtonState(false);
+        }
+      });
+      
+      audio.play().then(() => {
+        console.log('Audio playback started successfully from blob');
+      }).catch((error) => {
+        console.error('Error playing audio from blob:', error);
+        // Reset state
+        if (type === 'word') {
+          currentWordAudioElement = null;
+          isPlayingWordAudio = false;
+          updateWordButtonState(false);
+        } else if (type === 'example') {
+          currentExampleAudioElement = null;
+          isPlayingExampleAudio = false;
+          updateExampleButtonState(false);
+        }
+        // Fallback to playing in hidden tab
+        playAudioInHiddenTab(audioUrl, type);
+      });
+    } else {
+      console.error('Failed to fetch audio:', response?.error);
+      // Reset state
+      if (type === 'word') {
+        isPlayingWordAudio = false;
+        updateWordButtonState(false);
+      } else if (type === 'example') {
+        isPlayingExampleAudio = false;
+        updateExampleButtonState(false);
+      }
+      // Fallback to playing in hidden tab
+      playAudioInHiddenTab(audioUrl, type);
+    }
+  });
+}
+
+// Fallback: Play audio in hidden tab to avoid CORS issues
+function playAudioInHiddenTab(audioUrl, type = 'word') {
+  console.log('Playing audio in hidden tab to avoid CORS...');
+  
+  // Set playing state (will be reset when tab closes, but we can't track it)
+  if (type === 'word') {
+    isPlayingWordAudio = true;
+    updateWordButtonState(true);
+    // Reset after estimated duration (5 seconds for word)
+    setTimeout(() => {
+      isPlayingWordAudio = false;
+      updateWordButtonState(false);
+    }, 5000);
+  } else if (type === 'example') {
+    isPlayingExampleAudio = true;
+    updateExampleButtonState(true);
+    // Reset after estimated duration (10 seconds for example)
+    setTimeout(() => {
+      isPlayingExampleAudio = false;
+      updateExampleButtonState(false);
+    }, 10000);
+  }
+  
+  chrome.runtime.sendMessage({
+    action: 'playAudio',
+    url: audioUrl
+  }, (response) => {
+    if (chrome.runtime.lastError) {
+      console.error('Error playing audio in tab:', chrome.runtime.lastError);
+      showFlashcardNotification('⚠️ Không thể phát audio.');
+      // Reset state on error
+      if (type === 'word') {
+        isPlayingWordAudio = false;
+        updateWordButtonState(false);
+      } else if (type === 'example') {
+        isPlayingExampleAudio = false;
+        updateExampleButtonState(false);
+      }
+    } else if (response && response.success) {
+      console.log('Audio playing in hidden tab');
+    }
+  });
+}
+
+// Update button state based on playing status
+function updateWordButtonState(isPlaying) {
+  const playWordBtn = document.getElementById('playWordAudioBtn');
+  if (playWordBtn) {
+    if (isPlaying) {
+      playWordBtn.disabled = true;
+      playWordBtn.style.opacity = '0.6';
+      playWordBtn.style.cursor = 'not-allowed';
+    } else {
+      playWordBtn.disabled = false;
+      playWordBtn.style.opacity = '1';
+      playWordBtn.style.cursor = 'pointer';
+    }
+  }
+}
+
+function updateExampleButtonState(isPlaying) {
+  const playExampleBtn = document.getElementById('playExampleAudioBtn');
+  if (playExampleBtn) {
+    if (isPlaying) {
+      playExampleBtn.disabled = true;
+      playExampleBtn.style.opacity = '0.6';
+      playExampleBtn.style.cursor = 'not-allowed';
+    } else {
+      playExampleBtn.disabled = false;
+      playExampleBtn.style.opacity = '1';
+      playExampleBtn.style.cursor = 'pointer';
+    }
+  }
+}
+
+function handleFlashcardKnew() {
+  flashcardStats.knew++;
+  flashcardStats.current++;
+  
+  // Get current word
+  const currentWord = flashcardWords[currentFlashcardIndex];
+  if (!currentWord) return;
+  
+  // Update word's review status in storage
+  chrome.storage.local.get(['highlightedWords'], (result) => {
+    const words = result.highlightedWords || [];
+    const wordIndex = words.findIndex(w => w.word === currentWord.word && (w.url === currentWord.url || !currentWord.url));
+    
+    if (wordIndex !== -1) {
+      const now = Date.now();
+      words[wordIndex].lastReviewed = now;
+      words[wordIndex].reviewCount = (words[wordIndex].reviewCount || 0) + 1;
+      words[wordIndex].knewIt = true;
+      
+      // Update spaced repetition
+      const currentInterval = words[wordIndex].reviewInterval || 1;
+      words[wordIndex].reviewInterval = Math.min(currentInterval * 2, 30);
+      words[wordIndex].nextReview = now + (words[wordIndex].reviewInterval * 24 * 60 * 60 * 1000);
+      
+      chrome.storage.local.set({highlightedWords: words});
+    }
+  });
+  
+  // Update review count in Google Sheets (column H)
+  chrome.runtime.sendMessage({
+    action: 'logToSheets',
+    logData: {
+      action: 'review',
+      word: currentWord.word,
+      url: currentWord.url || '',
+      knew: true
+    }
+  });
+  
+  // Show answer
+  const answerDiv = document.getElementById('flashcardAnswer');
+  if (answerDiv) {
+    answerDiv.style.display = 'block';
+  }
+  
+  // Update card border color
+  const card = document.getElementById('flashcardCard');
+  if (card) {
+    card.style.borderColor = '#4CAF50';
+  }
+  
+  // Hide "Đã Thuộc" button, show "Tiếp Theo"
+  const knewBtn = document.getElementById('flashcardKnew');
+  const nextBtn = document.getElementById('flashcardNext');
+  if (knewBtn) knewBtn.style.display = 'none';
+  if (nextBtn) nextBtn.style.display = 'inline-block';
+}
+
+function handleFlashcardNext() {
+  currentFlashcardIndex++;
+  flashcardStats.current++;
+  
+  // Hide answer
+  const answerDiv = document.getElementById('flashcardAnswer');
+  if (answerDiv) {
+    answerDiv.style.display = 'none';
+  }
+  
+  // Reset card border color
+  const card = document.getElementById('flashcardCard');
+  if (card) {
+    card.style.borderColor = '#e0e0e0';
+  }
+  
+  // Show "Đã Thuộc" button, hide "Tiếp Theo"
+  const knewBtn = document.getElementById('flashcardKnew');
+  const nextBtn = document.getElementById('flashcardNext');
+  if (knewBtn) knewBtn.style.display = 'inline-block';
+  if (nextBtn) nextBtn.style.display = 'none';
+  
+  displayFlashcard();
 }
 
 function loadWords() {
@@ -941,7 +1988,8 @@ function exportSettingsToFile() {
     'wordFilterMode',
     'sheetUrl',
     'sheetName',
-    'selectedSheetId'
+    'selectedSheetId',
+    'voicerssApiKey'
   ], (result) => {
     const settings = {
       shortcutSettings: result.shortcutSettings || {modifier: 'alt', key: 'f'},
@@ -951,6 +1999,7 @@ function exportSettingsToFile() {
       sheetUrl: result.sheetUrl || 'https://docs.google.com/spreadsheets/d/1LTnXrNzm-MM6a5ElqhwUqNa70wsOVNJI2Wr7zGwZwb0/edit',
       sheetName: result.sheetName || '',
       selectedSheetId: result.selectedSheetId || '',
+      voicerssApiKey: result.voicerssApiKey || '',
       exportDate: new Date().toISOString(),
       version: '1.0'
     };
@@ -986,7 +2035,8 @@ function importSettingsFromFile(file) {
           wordFilterMode: settings.wordFilterMode || 'current',
           sheetUrl: settings.sheetUrl || 'https://docs.google.com/spreadsheets/d/1LTnXrNzm-MM6a5ElqhwUqNa70wsOVNJI2Wr7zGwZwb0/edit',
           sheetName: settings.sheetName || '',
-          selectedSheetId: settings.selectedSheetId || ''
+          selectedSheetId: settings.selectedSheetId || '',
+          voicerssApiKey: settings.voicerssApiKey || ''
         }, () => {
           // Reload settings in UI
           loadSettings();
@@ -1015,7 +2065,8 @@ function loadDefaultSettingsFromFile() {
         wordFilterMode: fileSettings.wordFilterMode || 'current',
         sheetUrl: fileSettings.sheetUrl || 'https://docs.google.com/spreadsheets/d/1LTnXrNzm-MM6a5ElqhwUqNa70wsOVNJI2Wr7zGwZwb0/edit',
         sheetName: fileSettings.sheetName || '',
-        selectedSheetId: fileSettings.selectedSheetId || ''
+        selectedSheetId: fileSettings.selectedSheetId || '',
+        voicerssApiKey: fileSettings.voicerssApiKey || ''
       }, () => {
         // Settings loaded from file - send to content script
         sendMessageToContentScript({
@@ -1039,7 +2090,8 @@ function loadDefaultSettingsFromFile() {
         wordFilterMode: 'current',
         sheetUrl: 'https://docs.google.com/spreadsheets/d/1LTnXrNzm-MM6a5ElqhwUqNa70wsOVNJI2Wr7zGwZwb0/edit',
         sheetName: '',
-        selectedSheetId: ''
+        selectedSheetId: '',
+        voicerssApiKey: ''
       }, () => {
         loadSettings();
       });
@@ -1080,6 +2132,9 @@ function initializeDefaultSettingsIfNeeded() {
           if (!result.selectedSheetId) {
             settingsToSet.selectedSheetId = fileSettings.selectedSheetId || '';
           }
+          if (!result.voicerssApiKey) {
+            settingsToSet.voicerssApiKey = fileSettings.voicerssApiKey || '';
+          }
           
           if (Object.keys(settingsToSet).length > 0) {
             chrome.storage.local.set(settingsToSet, () => {
@@ -1116,6 +2171,9 @@ function initializeDefaultSettingsIfNeeded() {
           }
           if (!result.selectedSheetId) {
             settingsToSet.selectedSheetId = '';
+          }
+          if (!result.voicerssApiKey) {
+            settingsToSet.voicerssApiKey = '';
           }
           
           if (Object.keys(settingsToSet).length > 0) {
@@ -1179,7 +2237,7 @@ function extractSheetId(url) {
 
 // Load settings into UI
 function loadSettings() {
-  chrome.storage.local.get(['shortcutSettings', 'highlightColor', 'wordCount', 'sheetUrl', 'sheetName'], (result) => {
+  chrome.storage.local.get(['shortcutSettings', 'highlightColor', 'wordCount', 'sheetUrl', 'sheetName', 'voicerssApiKey'], (result) => {
     // Load shortcut settings
     const settings = result.shortcutSettings || {modifier: 'alt', key: 'f'};
     document.getElementById('modifierKey').value = settings.modifier;
@@ -1215,6 +2273,13 @@ function loadSettings() {
     if (sheetName) {
       document.getElementById('sheetSelect').value = sheetName;
       document.getElementById('sheetsDropdown').style.display = 'block';
+    }
+    
+    // Load VoiceRSS API Key
+    const voicerssApiKey = result.voicerssApiKey || '';
+    const voicerssApiKeyInput = document.getElementById('voicerssApiKey');
+    if (voicerssApiKeyInput) {
+      voicerssApiKeyInput.value = voicerssApiKey;
     }
   });
 }

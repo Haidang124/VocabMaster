@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Audio Player</title>
+</head>
+<body>
+  <audio id="audioPlayer" controls style="display: none;"></audio>
+  <script>
+    const audio = document.getElementById('audioPlayer');
+    
+    // Get audio URL from URL parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    const audioUrl = urlParams.get('url');
+    
+    if (audioUrl) {
+      audio.src = decodeURIComponent(audioUrl);
+      audio.play().then(() => {
+        console.log('Audio playing');
+      }).catch((error) => {
+        console.error('Error playing audio:', error);
+      });
+      
+      // Close tab when audio ends
+      audio.addEventListener('ended', () => {
+        setTimeout(() => {
+          chrome.tabs.getCurrent((tab) => {
+            if (tab) {
+              chrome.tabs.remove(tab.id);
+            }
+          });
+        }, 1000);
+      });
+      
+      // Also listen for messages (fallback)
+      chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+        if (request.action === 'playAudio') {
+          audio.src = request.url;
+          audio.play().then(() => {
+            console.log('Audio playing from message');
+            sendResponse({success: true});
+          }).catch((error) => {
+            console.error('Error playing audio:', error);
+            sendResponse({success: false, error: error.message});
+          });
+          return true;
+        }
+      });
+    } else {
+      // If no URL parameter, wait for message
+      chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+        if (request.action === 'playAudio') {
+          audio.src = request.url;
+          audio.play().then(() => {
+            console.log('Audio playing from message');
+            sendResponse({success: true});
+          }).catch((error) => {
+            console.error('Error playing audio:', error);
+            sendResponse({success: false, error: error.message});
+          });
+          
+          // Close tab when audio ends
+          audio.addEventListener('ended', () => {
+            setTimeout(() => {
+              chrome.tabs.getCurrent((tab) => {
+                if (tab) {
+                  chrome.tabs.remove(tab.id);
+                }
+              });
+            }, 1000);
+          });
+          
+          return true;
+        }
+      });
+    }
+  </script>
+</body>
+</html>
+

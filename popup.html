@@ -263,6 +263,7 @@
   <div class="tabs">
     <div class="tab active" data-tab="highlights">Quản Lý Từ</div>
     <div class="tab" data-tab="review">Từ Ngẫu Nhiên</div>
+    <div class="tab" data-tab="flashcard">Flashcard</div>
     <div class="tab" data-tab="settings">Cài Đặt</div>
   </div>
   
@@ -280,6 +281,36 @@
     </div>
   </div>
   
+  <!-- Flashcard Tab -->
+  <div class="tab-content" id="flashcard">
+    <div style="margin-bottom: 15px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+        <h3 style="margin: 0; color: #333; font-size: 16px;">🎴 Flashcard</h3>
+        <div style="display: flex; gap: 8px;">
+          <button id="flashcardModeWord" style="padding: 6px 12px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold;">📝 Từ</button>
+          <button id="flashcardModeAudio" style="padding: 6px 12px; background: #e0e0e0; color: #666; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">🔊 Nghe</button>
+        </div>
+      </div>
+      <div style="font-size: 12px; color: #666; margin-bottom: 15px; padding: 8px; background: #f8f9fa; border-radius: 4px;">
+        💡 Chế độ <strong>Từ</strong>: Xem từ và đoán nghĩa. Chế độ <strong>Nghe</strong>: Nghe audio và đoán nghĩa.
+      </div>
+    </div>
+    
+    <div id="flashcardContainer" style="text-align: center; padding: 20px; background: white; border-radius: 8px; margin-bottom: 15px; min-height: 200px; display: flex; flex-direction: column; justify-content: center; align-items: center;">
+      <div style="font-size: 14px; color: #666; margin-bottom: 20px;">Nhấn "Bắt Đầu" để bắt đầu flashcard</div>
+      <button id="startFlashcard" style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px;">▶️ Bắt Đầu</button>
+    </div>
+    
+    <div style="display: flex; gap: 10px; justify-content: center; margin-top: 15px;">
+      <button id="flashcardKnew" style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px; display: none;">✅ Đã Thuộc</button>
+      <button id="flashcardNext" style="padding: 10px 20px; background: #2196F3; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px; display: none;">➡️ Tiếp Theo</button>
+    </div>
+    
+    <div class="stats" id="flashcardStats" style="margin-top: 15px; text-align: center; font-size: 12px; color: #666;">
+      Tiến độ: 0/0
+    </div>
+  </div>
+
   <!-- Review Tab -->
   <div class="tab-content" id="review">
     <div style="margin-bottom: 15px;">
@@ -399,6 +430,22 @@
            </div>
          </div>
     
+         <div style="margin-bottom: 20px;">
+           <h3 style="margin: 0 0 15px 0; color: #333; font-size: 16px;">🔊 VoiceRSS API Key</h3>
+           <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">API Key (để tạo audio cho từ):</label>
+           <input type="text" class="sheet-input" id="voicerssApiKey" placeholder="Nhập VoiceRSS API Key" style="margin-bottom: 10px;">
+           <button class="sheet-btn" id="saveVoicerssApiKey" style="margin-bottom: 10px;">💾 Lưu API Key</button>
+           <div style="font-size: 11px; color: #666; padding: 8px; background: #f8f9fa; border-radius: 4px; margin-bottom: 10px;">
+             💡 Lấy API Key miễn phí tại: <a href="https://www.voicerss.org/" target="_blank" style="color: #2196F3;">voicerss.org</a><br>
+             Free tier: 350 requests/day. API Key sẽ được dùng để tạo MP3 cho từ và câu ví dụ.
+           </div>
+           <button id="reloadMP3" style="padding: 10px 15px; background: #FF9800; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; width: 100%; margin-bottom: 10px;">🔄 Reload MP3 (Quét & Tạo Audio)</button>
+           <div id="reloadMP3Status" style="font-size: 12px; color: #666; padding: 8px; background: #f8f9fa; border-radius: 4px; display: none; margin-bottom: 10px;"></div>
+           <div style="font-size: 11px; color: #666; padding: 8px; background: #f8f9fa; border-radius: 4px;">
+             💡 Button này sẽ quét toàn bộ sheet, kiểm tra cột I (US audio) và J (UK audio). Nếu thiếu thì tự động generate và điền vào. Chỉ cần chạy 1 lần.
+           </div>
+         </div>
+         
          <div style="margin-bottom: 20px;">
            <h3 style="margin: 0 0 15px 0; color: #333; font-size: 16px;">💾 Backup & Restore</h3>
            <div style="display: flex; gap: 10px; margin-bottom: 10px;">
