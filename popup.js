@@ -1,4 +1,6 @@
 // Popup script for handling UI interactions
+// Constants and logger are loaded via script tags in popup.html
+
 let currentTab = 'highlights';
 let highlightedWords = [];
 let reviewWords = [];
@@ -26,12 +28,120 @@ function saveWordFilterMode(mode) {
 // Flashcard variables
 let flashcardWords = [];
 let currentFlashcardIndex = 0;
-let flashcardMode = 'word'; // 'word' or 'audio'
+let flashcardMode = FLASHCARD_MODES.WORD; // Use constant instead of 'word'
 let flashcardStats = { total: 0, current: 0, knew: 0 };
 let isPlayingWordAudio = false;
 let isPlayingExampleAudio = false;
 let currentWordAudioElement = null;
 let currentExampleAudioElement = null;
+
+// State persistence functions
+function saveReviewState() {
+  chrome.storage.local.set({
+    reviewState: {
+      words: reviewWords,
+      currentIndex: currentReviewIndex,
+      timestamp: Date.now()
+    }
+  });
+}
+
+function loadReviewState() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['reviewState'], (result) => {
+      if (result.reviewState && result.reviewState.words && result.reviewState.words.length > 0) {
+        // Check if state is not too old (within 1 day)
+        const stateAge = Date.now() - (result.reviewState.timestamp || 0);
+        const maxAge = 24 * 60 * 60 * 1000; // 1 day
+        
+        if (stateAge < maxAge) {
+          reviewWords = result.reviewState.words;
+          currentReviewIndex = result.reviewState.currentIndex || 0;
+          resolve(true); // State restored
+          return;
+        }
+      }
+      resolve(false); // No valid state
+    });
+  });
+}
+
+function clearReviewState() {
+  chrome.storage.local.remove(['reviewState']);
+}
+
+function saveFlashcardState() {
+  chrome.storage.local.set({
+    flashcardState: {
+      words: flashcardWords,
+      currentIndex: currentFlashcardIndex,
+      mode: flashcardMode,
+      stats: flashcardStats,
+      timestamp: Date.now()
+    }
+  });
+}
+
+function loadFlashcardState() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['flashcardState'], (result) => {
+      if (result.flashcardState && result.flashcardState.words && result.flashcardState.words.length > 0) {
+        // Check if state is not too old (within 1 day)
+        const stateAge = Date.now() - (result.flashcardState.timestamp || 0);
+        const maxAge = 24 * 60 * 60 * 1000; // 1 day
+        
+        if (stateAge < maxAge) {
+          flashcardWords = result.flashcardState.words;
+          currentFlashcardIndex = result.flashcardState.currentIndex || 0;
+          flashcardMode = result.flashcardState.mode || FLASHCARD_MODES.WORD;
+          flashcardStats = result.flashcardState.stats || { total: 0, current: 0, knew: 0 };
+          resolve(true); // State restored
+          return;
+        }
+      }
+      resolve(false); // No valid state
+    });
+  });
+}
+
+function clearFlashcardState() {
+  chrome.storage.local.remove(['flashcardState']);
+}
+
+// Loading indicator helper functions
+function showLoadingIndicator(containerId, message = 'Đang tải...') {
+  const container = document.getElementById(containerId);
+  if (container) {
+    container.innerHTML = `
+      <div class="loading-container">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">${message}</div>
+      </div>
+    `;
+  }
+}
+
+function hideLoadingIndicator(containerId) {
+  const container = document.getElementById(containerId);
+  if (container) {
+    container.innerHTML = '';
+  }
+}
+
+function showProgressBar(containerId, current, total, message = 'Đang xử lý...') {
+  const container = document.getElementById(containerId);
+  if (container) {
+    const percent = total > 0 ? Math.round((current / total) * 100) : 0;
+    container.innerHTML = `
+      <div class="loading-container">
+        <div class="progress-bar">
+          <div class="progress-fill" style="width: ${percent}%"></div>
+        </div>
+        <div class="loading-text">${message} ${percent}% (${current}/${total})</div>
+      </div>
+    `;
+  }
+}
 
 // Initialize popup
 document.addEventListener('DOMContentLoaded', () => {
@@ -84,11 +194,36 @@ function initializeTabs() {
           loadWords();
         });
       } else if (tabName === 'review') {
-        loadReviewWords();
+        // Try to restore state first
+        loadReviewState().then((restored) => {
+          if (restored) {
+            // State restored, display all words (same as when first loaded)
+            displayReviewWords(reviewWords);
+          } else {
+            // No state, load new words
+            loadReviewWords();
+          }
+        });
       } else if (tabName === 'flashcard') {
         initializeFlashcard();
-        // Auto-load words from sheet when opening flashcard tab
-        loadFlashcardWords();
+        // Try to restore state first
+        loadFlashcardState().then((restored) => {
+          if (restored) {
+            // State restored, update mode buttons first
+            updateFlashcardModeButtons();
+            // Then show current card
+            displayFlashcard();
+            const knewBtn = document.getElementById('flashcardKnew');
+            const didntKnowBtn = document.getElementById('flashcardDidntKnow');
+            if (knewBtn) knewBtn.style.display = 'inline-block';
+            if (didntKnowBtn) didntKnowBtn.style.display = 'inline-block';
+            const startBtn = document.getElementById('startFlashcard');
+            if (startBtn) startBtn.style.display = 'none';
+          } else {
+            // No state, load new words
+            loadFlashcardWords();
+          }
+        });
       } else if (tabName === 'settings') {
         // Load settings when switching to settings tab
         loadSettings();
@@ -123,7 +258,7 @@ function initializeColorPicker() {
             color: color
       }, (response, error) => {
         if (error) {
-          console.log('Content script not available for color update');
+          logger.log('Content script not available for color update');
         }
       });
     });
@@ -175,7 +310,7 @@ function initializeControls() {
           shortcut: settings
         }, (response, error) => {
           if (error) {
-            console.log('Content script not available for shortcut update');
+            logger.log('Content script not available for shortcut update');
           }
         });
       });
@@ -304,12 +439,12 @@ function initializeControls() {
                 return;
               }
               
-              console.log('Starting to fetch sheets...');
-              console.log('Google Sheets API instance:', googleSheetsAPI);
-              console.log('Fetching sheets for URL:', sheetUrl);
+              logger.log('Starting to fetch sheets...');
+              logger.log('Google Sheets API instance:', googleSheetsAPI);
+              logger.log('Fetching sheets for URL:', sheetUrl);
               
               const sheets = await googleSheetsAPI.fetchSheets(sheetUrl);
-              console.log('Fetched sheets successfully:', sheets);
+              logger.log('Fetched sheets successfully:', sheets);
               
               if (sheets.length > 0) {
                 // Populate dropdown
@@ -330,8 +465,8 @@ function initializeControls() {
                 showNotification('Không tìm thấy trang tính nào', 'error');
               }
             } catch (error) {
-              console.error('Error fetching sheets:', error);
-              console.error('Error stack:', error.stack);
+              logger.error('Error fetching sheets:', error);
+              logger.error('Error stack:', error.stack);
               showNotification('Lỗi khi tải trang tính: ' + error.message, 'error');
             } finally {
               fetchSheetsBtn.textContent = '🔍 Tải Danh Sách Trang Tính';
@@ -478,12 +613,15 @@ function initializeFlashcard() {
   const modeAudioBtn = document.getElementById('flashcardModeAudio');
   const startBtn = document.getElementById('startFlashcard');
   const knewBtn = document.getElementById('flashcardKnew');
-  const nextBtn = document.getElementById('flashcardNext');
   
   if (modeWordBtn) {
     modeWordBtn.addEventListener('click', () => {
-      flashcardMode = 'word';
+      flashcardMode = FLASHCARD_MODES.WORD;
       updateFlashcardModeButtons();
+      // Save state when switching mode
+      if (flashcardWords.length > 0) {
+        saveFlashcardState();
+      }
       // Reload current card with new mode (keep same word)
       if (flashcardWords.length > 0 && currentFlashcardIndex < flashcardWords.length) {
         displayFlashcard();
@@ -493,8 +631,12 @@ function initializeFlashcard() {
   
   if (modeAudioBtn) {
     modeAudioBtn.addEventListener('click', () => {
-      flashcardMode = 'audio';
+      flashcardMode = FLASHCARD_MODES.AUDIO;
       updateFlashcardModeButtons();
+      // Save state when switching mode
+      if (flashcardWords.length > 0) {
+        saveFlashcardState();
+      }
       // Reload current card with new mode (keep same word)
       if (flashcardWords.length > 0 && currentFlashcardIndex < flashcardWords.length) {
         displayFlashcard();
@@ -508,15 +650,17 @@ function initializeFlashcard() {
     });
   }
   
+  const didntKnowBtn = document.getElementById('flashcardDidntKnow');
+  
   if (knewBtn) {
     knewBtn.addEventListener('click', () => {
       handleFlashcardKnew();
     });
   }
   
-  if (nextBtn) {
-    nextBtn.addEventListener('click', () => {
-      handleFlashcardNext();
+  if (didntKnowBtn) {
+    didntKnowBtn.addEventListener('click', () => {
+      handleFlashcardDidntKnow();
     });
   }
   
@@ -528,7 +672,7 @@ function updateFlashcardModeButtons() {
   const modeAudioBtn = document.getElementById('flashcardModeAudio');
   
   if (modeWordBtn && modeAudioBtn) {
-    if (flashcardMode === 'word') {
+    if (flashcardMode === FLASHCARD_MODES.WORD) {
       modeWordBtn.style.background = '#4CAF50';
       modeWordBtn.style.color = 'white';
       modeWordBtn.style.fontWeight = 'bold';
@@ -552,8 +696,9 @@ function loadFlashcardWords() {
   const knewBtn = document.getElementById('flashcardKnew');
   const nextBtn = document.getElementById('flashcardNext');
   
+  // Show loading indicator
   if (container) {
-    container.innerHTML = '<div style="font-size: 14px; color: #666;">Đang tải từ...</div>';
+    showLoadingIndicator('flashcardContainer', 'Đang tải từ vựng...');
   }
   
   // Get wordCount from settings
@@ -565,7 +710,25 @@ function loadFlashcardWords() {
       count: wordCount,
       mode: flashcardMode
     }, (response) => {
-    if (response && response.words && response.words.length > 0) {
+      try {
+        if (chrome.runtime.lastError) {
+          logger.error('Error getting flashcard words:', chrome.runtime.lastError);
+          showFlashcardNotification('⚠️ ' + ERROR_MESSAGES.NETWORK_ERROR);
+          if (container) {
+            container.innerHTML = `
+              <div style="font-size: 14px; color: #666; margin-bottom: 20px;">
+                ${ERROR_MESSAGES.NETWORK_ERROR}
+              </div>
+              <button id="startFlashcard" style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px;">▶️ Thử Lại</button>
+            `;
+            document.getElementById('startFlashcard').addEventListener('click', () => {
+              loadFlashcardWords();
+            });
+          }
+          return;
+        }
+        
+        if (response && response.words && response.words.length > 0) {
       flashcardWords = response.words;
       currentFlashcardIndex = 0;
       flashcardStats = {
@@ -576,22 +739,38 @@ function loadFlashcardWords() {
       
       displayFlashcard();
       
-      if (startBtn) startBtn.style.display = 'none';
-      if (knewBtn) knewBtn.style.display = 'inline-block';
-      if (nextBtn) nextBtn.style.display = 'inline-block';
-    } else {
-      if (container) {
-        container.innerHTML = `
-          <div style="font-size: 14px; color: #666; margin-bottom: 20px;">
-            ${flashcardMode === 'audio' ? 'Không có từ nào có audio. Hãy highlight một số từ trước!' : 'Chưa có từ để học. Hãy highlight một số từ trước!'}
-          </div>
-          <button id="startFlashcard" style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px;">▶️ Bắt Đầu</button>
-        `;
-        document.getElementById('startFlashcard').addEventListener('click', () => {
-          loadFlashcardWords();
-        });
+          if (startBtn) startBtn.style.display = 'none';
+          if (knewBtn) knewBtn.style.display = 'inline-block';
+          const didntKnowBtn = document.getElementById('flashcardDidntKnow');
+          if (didntKnowBtn) didntKnowBtn.style.display = 'inline-block';
+        } else {
+          if (container) {
+            container.innerHTML = `
+              <div style="font-size: 14px; color: #666; margin-bottom: 20px;">
+                ${flashcardMode === FLASHCARD_MODES.AUDIO ? ERROR_MESSAGES.NO_AUDIO_WORDS : ERROR_MESSAGES.NO_WORDS}
+              </div>
+              <button id="startFlashcard" style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px;">▶️ Bắt Đầu</button>
+            `;
+            document.getElementById('startFlashcard').addEventListener('click', () => {
+              loadFlashcardWords();
+            });
+          }
+        }
+      } catch (error) {
+        logger.error('Error in loadFlashcardWords callback:', error);
+        showFlashcardNotification('⚠️ ' + ERROR_MESSAGES.UNKNOWN_ERROR);
+        if (container) {
+          container.innerHTML = `
+            <div style="font-size: 14px; color: #f44336; margin-bottom: 20px;">
+              ${ERROR_MESSAGES.UNKNOWN_ERROR}
+            </div>
+            <button id="startFlashcard" style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px;">▶️ Thử Lại</button>
+          `;
+          document.getElementById('startFlashcard').addEventListener('click', () => {
+            loadFlashcardWords();
+          });
+        }
       }
-    }
     });
   });
 }
@@ -631,9 +810,9 @@ function displayFlashcard() {
     }
     
     const knewBtn = document.getElementById('flashcardKnew');
-    const nextBtn = document.getElementById('flashcardNext');
+    const didntKnowBtn = document.getElementById('flashcardDidntKnow');
     if (knewBtn) knewBtn.style.display = 'none';
-    if (nextBtn) nextBtn.style.display = 'none';
+    if (didntKnowBtn) didntKnowBtn.style.display = 'none';
     
     return;
   }
@@ -838,14 +1017,14 @@ function displayFlashcard() {
       
       // Auto-play word audio when card is shown (only in audio mode)
       // Use currentWord from currentFlashcardIndex to ensure sync
-      if (flashcardMode === 'audio') {
+      if (flashcardMode === FLASHCARD_MODES.AUDIO) {
         setTimeout(() => {
           // Get current word again to ensure it's the correct one
           const wordToPlay = flashcardWords[currentFlashcardIndex];
           if (wordToPlay && wordToPlay.word === currentWord.word) {
             playFlashcardWordAudio(wordToPlay);
           }
-        }, 500);
+        }, TIMEOUTS.AUDIO_AUTO_PLAY_DELAY);
       }
     }
   }
@@ -880,13 +1059,13 @@ function playFlashcardWordAudio(word) {
     generateAudioForWord(word).then((generatedAudio) => {
       if (generatedAudio && (generatedAudio.wordAudioUrlUS || generatedAudio.wordAudioUrlUK)) {
         audioUrl = generatedAudio.wordAudioUrlUS || generatedAudio.wordAudioUrlUK;
-        playAudioFromUrl(audioUrl, 'word');
+        playAudioFromUrl(audioUrl, AUDIO_TYPES.WORD);
         showFlashcardNotification('✅ Đã tạo audio!');
       } else {
         showFlashcardNotification('⚠️ Không thể tạo audio. Vui lòng kiểm tra VoiceRSS API Key.');
       }
     }).catch((error) => {
-      console.error('Error generating audio:', error);
+      logger.error('Error generating audio:', error);
       showFlashcardNotification('⚠️ Lỗi khi tạo audio. Vui lòng thử lại.');
     });
     return;
@@ -1037,7 +1216,7 @@ function playFlashcardExampleAudio(word) {
       const audioUrl = `https://api.voicerss.org/?${params.toString()}`;
       playAudioFromUrl(audioUrl, 'example');
     } else {
-      console.warn('No VoiceRSS API key for example audio');
+      logger.warn('No VoiceRSS API key for example audio');
       showFlashcardNotification('⚠️ Chưa có VoiceRSS API Key. Vào Cài Đặt để thêm API Key.');
     }
   });
@@ -1055,18 +1234,18 @@ function showFlashcardNotification(message) {
     notification.style.cssText = 'font-size: 12px; color: #f44336; margin-top: 10px; padding: 8px; background: #ffebee; border-radius: 4px; text-align: center;';
     notification.textContent = message;
     container.appendChild(notification);
-    setTimeout(() => notification.remove(), 3000);
+      setTimeout(() => notification.remove(), TIMEOUTS.NOTIFICATION_DISPLAY);
   }
 }
 
-function playAudioFromUrl(audioUrl, type = 'word') {
+function playAudioFromUrl(audioUrl, type = AUDIO_TYPES.WORD) {
   if (!audioUrl || !audioUrl.trim()) {
-    console.error('Invalid audio URL:', audioUrl);
+    logger.error('Invalid audio URL:', audioUrl);
     showFlashcardNotification('⚠️ URL audio không hợp lệ');
     return;
   }
   
-  console.log('Playing audio from URL:', audioUrl, 'Type:', type);
+  logger.log('Playing audio from URL:', audioUrl, 'Type:', type);
   
   // Check if URL is from VoiceRSS (no CORS issue) or Cambridge (CORS issue)
   const isVoiceRSS = audioUrl.includes('api.voicerss.org');
@@ -1081,22 +1260,22 @@ function playAudioFromUrl(audioUrl, type = 'word') {
   } else {
     // Try direct first, fallback to background fetch if fails
     playAudioDirectly(audioUrl, type).catch(() => {
-      console.log('Direct play failed, trying background fetch...');
+      logger.log('Direct play failed, trying background fetch...');
       fetchAudioViaBackground(audioUrl, type);
     });
   }
 }
 
-function playAudioDirectly(audioUrl, type = 'word') {
+function playAudioDirectly(audioUrl, type = AUDIO_TYPES.WORD) {
   return new Promise((resolve, reject) => {
     const audio = new Audio(audioUrl);
     
     // Store audio element and set playing state
-    if (type === 'word') {
+    if (type === AUDIO_TYPES.WORD) {
       currentWordAudioElement = audio;
       isPlayingWordAudio = true;
       updateWordButtonState(true);
-    } else if (type === 'example') {
+    } else if (type === AUDIO_TYPES.EXAMPLE) {
       currentExampleAudioElement = audio;
       isPlayingExampleAudio = true;
       updateExampleButtonState(true);
@@ -1104,27 +1283,27 @@ function playAudioDirectly(audioUrl, type = 'word') {
     
     // Add event listeners for debugging
     audio.addEventListener('loadstart', () => {
-      console.log('Audio loading started');
+      logger.log('Audio loading started');
     });
     
     audio.addEventListener('canplay', () => {
-      console.log('Audio can play');
+      logger.log('Audio can play');
     });
     
     audio.addEventListener('error', (e) => {
-      console.error('Audio error:', e);
-      console.error('Audio error details:', {
+      logger.error('Audio error:', e);
+      logger.error('Audio error details:', {
         code: audio.error?.code,
         message: audio.error?.message,
         url: audioUrl
       });
       
       // Reset state on error
-      if (type === 'word') {
+      if (type === AUDIO_TYPES.WORD) {
         currentWordAudioElement = null;
         isPlayingWordAudio = false;
         updateWordButtonState(false);
-      } else if (type === 'example') {
+      } else if (type === AUDIO_TYPES.EXAMPLE) {
         currentExampleAudioElement = null;
         isPlayingExampleAudio = false;
         updateExampleButtonState(false);
@@ -1137,11 +1316,11 @@ function playAudioDirectly(audioUrl, type = 'word') {
       console.log('Audio playback ended');
       
       // Reset state when ended
-      if (type === 'word') {
+      if (type === AUDIO_TYPES.WORD) {
         currentWordAudioElement = null;
         isPlayingWordAudio = false;
         updateWordButtonState(false);
-      } else if (type === 'example') {
+      } else if (type === AUDIO_TYPES.EXAMPLE) {
         currentExampleAudioElement = null;
         isPlayingExampleAudio = false;
         updateExampleButtonState(false);
@@ -1152,22 +1331,22 @@ function playAudioDirectly(audioUrl, type = 'word') {
     
     // Try to play audio
     audio.play().then(() => {
-      console.log('Audio playback started successfully');
+      logger.log('Audio playback started successfully');
       resolve();
     }).catch((error) => {
-      console.error('Error playing audio:', error);
-      console.error('Error details:', {
+      logger.error('Error playing audio:', error);
+      logger.error('Error details:', {
         name: error.name,
         message: error.message,
         url: audioUrl
       });
       
       // Reset state on error
-      if (type === 'word') {
+      if (type === AUDIO_TYPES.WORD) {
         currentWordAudioElement = null;
         isPlayingWordAudio = false;
         updateWordButtonState(false);
-      } else if (type === 'example') {
+      } else if (type === AUDIO_TYPES.EXAMPLE) {
         currentExampleAudioElement = null;
         isPlayingExampleAudio = false;
         updateExampleButtonState(false);
@@ -1178,11 +1357,11 @@ function playAudioDirectly(audioUrl, type = 'word') {
   });
 }
 
-function fetchAudioViaBackground(audioUrl, type = 'word') {
-  console.log('Fetching audio via background script to avoid CORS...');
+function fetchAudioViaBackground(audioUrl, type = AUDIO_TYPES.WORD) {
+  logger.log('Fetching audio via background script to avoid CORS...');
   
   // Set playing state
-  if (type === 'word') {
+  if (type === AUDIO_TYPES.WORD) {
     isPlayingWordAudio = true;
     updateWordButtonState(true);
   } else if (type === 'example') {
@@ -1207,20 +1386,20 @@ function fetchAudioViaBackground(audioUrl, type = 'word') {
       const audio = new Audio(response.blobUrl);
       
       // Store audio element
-      if (type === 'word') {
+      if (type === AUDIO_TYPES.WORD) {
         currentWordAudioElement = audio;
-      } else if (type === 'example') {
+      } else if (type === AUDIO_TYPES.EXAMPLE) {
         currentExampleAudioElement = audio;
       }
       
       audio.addEventListener('error', (e) => {
         console.error('Audio playback error:', e);
         // Reset state
-        if (type === 'word') {
+        if (type === AUDIO_TYPES.WORD) {
           currentWordAudioElement = null;
           isPlayingWordAudio = false;
           updateWordButtonState(false);
-        } else if (type === 'example') {
+        } else if (type === AUDIO_TYPES.EXAMPLE) {
           currentExampleAudioElement = null;
           isPlayingExampleAudio = false;
           updateExampleButtonState(false);
@@ -1232,11 +1411,11 @@ function fetchAudioViaBackground(audioUrl, type = 'word') {
       audio.addEventListener('ended', () => {
         console.log('Audio playback ended');
         // Reset state
-        if (type === 'word') {
+        if (type === AUDIO_TYPES.WORD) {
           currentWordAudioElement = null;
           isPlayingWordAudio = false;
           updateWordButtonState(false);
-        } else if (type === 'example') {
+        } else if (type === AUDIO_TYPES.EXAMPLE) {
           currentExampleAudioElement = null;
           isPlayingExampleAudio = false;
           updateExampleButtonState(false);
@@ -1248,11 +1427,11 @@ function fetchAudioViaBackground(audioUrl, type = 'word') {
       }).catch((error) => {
         console.error('Error playing audio from blob:', error);
         // Reset state
-        if (type === 'word') {
+        if (type === AUDIO_TYPES.WORD) {
           currentWordAudioElement = null;
           isPlayingWordAudio = false;
           updateWordButtonState(false);
-        } else if (type === 'example') {
+        } else if (type === AUDIO_TYPES.EXAMPLE) {
           currentExampleAudioElement = null;
           isPlayingExampleAudio = false;
           updateExampleButtonState(false);
@@ -1263,10 +1442,10 @@ function fetchAudioViaBackground(audioUrl, type = 'word') {
     } else {
       console.error('Failed to fetch audio:', response?.error);
       // Reset state
-      if (type === 'word') {
+      if (type === AUDIO_TYPES.WORD) {
         isPlayingWordAudio = false;
         updateWordButtonState(false);
-      } else if (type === 'example') {
+      } else if (type === AUDIO_TYPES.EXAMPLE) {
         isPlayingExampleAudio = false;
         updateExampleButtonState(false);
       }
@@ -1277,18 +1456,18 @@ function fetchAudioViaBackground(audioUrl, type = 'word') {
 }
 
 // Fallback: Play audio in hidden tab to avoid CORS issues
-function playAudioInHiddenTab(audioUrl, type = 'word') {
-  console.log('Playing audio in hidden tab to avoid CORS...');
+function playAudioInHiddenTab(audioUrl, type = AUDIO_TYPES.WORD) {
+  logger.log('Playing audio in hidden tab to avoid CORS...');
   
   // Set playing state (will be reset when tab closes, but we can't track it)
-  if (type === 'word') {
+  if (type === AUDIO_TYPES.WORD) {
     isPlayingWordAudio = true;
     updateWordButtonState(true);
     // Reset after estimated duration (5 seconds for word)
     setTimeout(() => {
       isPlayingWordAudio = false;
       updateWordButtonState(false);
-    }, 5000);
+    }, TIMEOUTS.HIDDEN_TAB_AUDIO_TIMEOUT);
   } else if (type === 'example') {
     isPlayingExampleAudio = true;
     updateExampleButtonState(true);
@@ -1307,10 +1486,10 @@ function playAudioInHiddenTab(audioUrl, type = 'word') {
       console.error('Error playing audio in tab:', chrome.runtime.lastError);
       showFlashcardNotification('⚠️ Không thể phát audio.');
       // Reset state on error
-      if (type === 'word') {
+      if (type === AUDIO_TYPES.WORD) {
         isPlayingWordAudio = false;
         updateWordButtonState(false);
-      } else if (type === 'example') {
+      } else if (type === AUDIO_TYPES.EXAMPLE) {
         isPlayingExampleAudio = false;
         updateExampleButtonState(false);
       }
@@ -1355,6 +1534,9 @@ function handleFlashcardKnew() {
   flashcardStats.knew++;
   flashcardStats.current++;
   
+  // Save state
+  saveFlashcardState();
+  
   // Get current word
   const currentWord = flashcardWords[currentFlashcardIndex];
   if (!currentWord) return;
@@ -1372,8 +1554,11 @@ function handleFlashcardKnew() {
       
       // Update spaced repetition
       const currentInterval = words[wordIndex].reviewInterval || 1;
-      words[wordIndex].reviewInterval = Math.min(currentInterval * 2, 30);
-      words[wordIndex].nextReview = now + (words[wordIndex].reviewInterval * 24 * 60 * 60 * 1000);
+      words[wordIndex].reviewInterval = Math.min(
+        currentInterval * SPACED_REPETITION.MULTIPLIER,
+        SPACED_REPETITION.MAX_INTERVAL
+      );
+      words[wordIndex].nextReview = now + (words[wordIndex].reviewInterval * SPACED_REPETITION.MILLISECONDS_PER_DAY);
       
       chrome.storage.local.set({highlightedWords: words});
     }
@@ -1402,16 +1587,103 @@ function handleFlashcardKnew() {
     card.style.borderColor = '#4CAF50';
   }
   
-  // Hide "Đã Thuộc" button, show "Tiếp Theo"
-  const knewBtn = document.getElementById('flashcardKnew');
-  const nextBtn = document.getElementById('flashcardNext');
-  if (knewBtn) knewBtn.style.display = 'none';
-  if (nextBtn) nextBtn.style.display = 'inline-block';
+  // Auto move to next card after a short delay
+  setTimeout(() => {
+    handleFlashcardNext();
+  }, 800); // 800ms delay to show the answer
+}
+
+function handleFlashcardDidntKnow() {
+  flashcardStats.current++;
+  
+  // Save state
+  saveFlashcardState();
+  
+  // Get current word
+  const currentWord = flashcardWords[currentFlashcardIndex];
+  if (!currentWord) return;
+  
+  // Update word's review status in storage
+  chrome.storage.local.get(['highlightedWords'], (result) => {
+    const words = result.highlightedWords || [];
+    const wordIndex = words.findIndex(w => w.word === currentWord.word && (w.url === currentWord.url || !currentWord.url));
+    
+    if (wordIndex !== -1) {
+      const now = Date.now();
+      words[wordIndex].lastReviewed = now;
+      words[wordIndex].reviewCount = (words[wordIndex].reviewCount || 0) + 1;
+      words[wordIndex].knewIt = false;
+      
+      // Reset spaced repetition (word not known, review sooner)
+      words[wordIndex].reviewInterval = SPACED_REPETITION.INITIAL_INTERVAL;
+      words[wordIndex].nextReview = now + SPACED_REPETITION.MILLISECONDS_PER_DAY;
+      
+      chrome.storage.local.set({highlightedWords: words});
+    }
+  });
+  
+  // Update review count in Google Sheets (column H)
+  chrome.runtime.sendMessage({
+    action: 'logToSheets',
+    logData: {
+      action: 'review',
+      word: currentWord.word,
+      url: currentWord.url || '',
+      knew: false
+    }
+  });
+  
+  // Show answer
+  const answerDiv = document.getElementById('flashcardAnswer');
+  if (answerDiv) {
+    answerDiv.style.display = 'block';
+  }
+  
+  // Update card border color (red for didn't know)
+  const card = document.getElementById('flashcardCard');
+  if (card) {
+    card.style.borderColor = '#f44336';
+  }
+  
+  // Auto move to next card after a short delay
+  setTimeout(() => {
+    handleFlashcardNext();
+  }, 800); // 800ms delay to show the answer
 }
 
 function handleFlashcardNext() {
   currentFlashcardIndex++;
   flashcardStats.current++;
+  
+  // Save state
+  saveFlashcardState();
+  
+  // Check if finished
+  if (currentFlashcardIndex >= flashcardWords.length) {
+    // Finished, clear state and show completion message
+    clearFlashcardState();
+    const container = document.getElementById('flashcardContainer');
+    if (container) {
+      container.innerHTML = `
+        <div style="text-align: center; padding: 40px 20px;">
+          <div style="font-size: 24px; margin-bottom: 15px;">🎉</div>
+          <div style="font-size: 18px; color: #4CAF50; margin-bottom: 10px; font-weight: bold;">Hoàn thành!</div>
+          <div style="font-size: 14px; color: #666; margin-bottom: 20px;">
+            Đã học ${flashcardStats.total} từ | Đã thuộc: ${flashcardStats.knew}
+          </div>
+          <button id="startFlashcard" style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px;">▶️ Bắt Đầu Lại</button>
+        </div>
+      `;
+      document.getElementById('startFlashcard').addEventListener('click', () => {
+        loadFlashcardWords();
+      });
+    }
+    const knewBtn = document.getElementById('flashcardKnew');
+    const didntKnowBtn = document.getElementById('flashcardDidntKnow');
+    if (knewBtn) knewBtn.style.display = 'none';
+    if (didntKnowBtn) didntKnowBtn.style.display = 'none';
+    return;
+  }
   
   // Hide answer
   const answerDiv = document.getElementById('flashcardAnswer');
@@ -1425,11 +1697,11 @@ function handleFlashcardNext() {
     card.style.borderColor = '#e0e0e0';
   }
   
-  // Show "Đã Thuộc" button, hide "Tiếp Theo"
+  // Show "Đã Thuộc" and "Chưa Thuộc" buttons
   const knewBtn = document.getElementById('flashcardKnew');
-  const nextBtn = document.getElementById('flashcardNext');
+  const didntKnowBtn = document.getElementById('flashcardDidntKnow');
   if (knewBtn) knewBtn.style.display = 'inline-block';
-  if (nextBtn) nextBtn.style.display = 'none';
+  if (didntKnowBtn) didntKnowBtn.style.display = 'inline-block';
   
   displayFlashcard();
 }
@@ -1581,6 +1853,10 @@ function loadReviewWords() {
     
     chrome.runtime.sendMessage({action: 'getRandomWords', count: wordCount}, (response) => {
       if (response && response.words && response.words.length > 0) {
+        reviewWords = response.words;
+        currentReviewIndex = 0;
+        // Save state
+        saveReviewState();
         displayReviewWords(response.words);
       } else {
         displayNoWords();
@@ -1789,7 +2065,13 @@ function handleReviewResponse(knewIt) {
   
   // Move to next word
   currentReviewIndex++;
+  
+  // Save state
+  saveReviewState();
+  
   if (currentReviewIndex >= reviewWords.length) {
+    // Finished, clear state and load new words
+    clearReviewState();
     currentReviewIndex = 0;
     loadReviewWords(); // Load new random words
   } else {

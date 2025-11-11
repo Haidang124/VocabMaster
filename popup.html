@@ -303,7 +303,7 @@
     
     <div style="display: flex; gap: 10px; justify-content: center; margin-top: 15px;">
       <button id="flashcardKnew" style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px; display: none;">✅ Đã Thuộc</button>
-      <button id="flashcardNext" style="padding: 10px 20px; background: #2196F3; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px; display: none;">➡️ Tiếp Theo</button>
+      <button id="flashcardDidntKnow" style="padding: 10px 20px; background: #f44336; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px; display: none;">❌ Chưa Thuộc</button>
     </div>
     
     <div class="stats" id="flashcardStats" style="margin-top: 15px; text-align: center; font-size: 12px; color: #666;">
@@ -471,6 +471,56 @@
     </div>
   </div>
   
+  <!-- Loading Spinner Styles -->
+  <style>
+    .loading-spinner {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 3px solid #f3f3f3;
+      border-top: 3px solid #4CAF50;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    .loading-container {
+      text-align: center;
+      padding: 20px;
+    }
+    
+    .loading-text {
+      color: #666;
+      font-size: 14px;
+      margin-top: 10px;
+    }
+    
+    .progress-bar {
+      width: 100%;
+      height: 6px;
+      background: #f0f0f0;
+      border-radius: 10px;
+      overflow: hidden;
+      margin: 10px 0;
+    }
+    
+    .progress-fill {
+      height: 100%;
+      background: #4CAF50;
+      border-radius: 10px;
+      transition: width 0.3s ease;
+      width: 0%;
+    }
+  </style>
+  
+  <script src="constants.js"></script>
+  <script src="logger.js"></script>
   <script src="googleSheetsAPI.js"></script>
   <script src="popup.js"></script>
 </body>

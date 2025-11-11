@@ -1,4 +1,29 @@
 // Background script for handling keyboard shortcuts and storage
+// Import constants and logger (they are loaded via script tags or inline)
+// Note: In service worker, we need to define them inline or use importScripts
+
+// Load constants inline (since service workers don't support ES6 modules)
+const FLASHCARD_MODES = { WORD: 'word', AUDIO: 'audio' };
+const AUDIO_TYPES = { WORD: 'word', EXAMPLE: 'example' };
+const TIMEOUTS = { AUDIO_AUTO_PLAY_DELAY: 500, TAB_CLOSE_DELAY: 1000, NOTIFICATION_DISPLAY: 3000, RETRY_DELAY: 100, HIDDEN_TAB_AUDIO_TIMEOUT: 5000 };
+const SPACED_REPETITION = { MAX_INTERVAL: 30, INITIAL_INTERVAL: 1, MULTIPLIER: 2, MILLISECONDS_PER_DAY: 24 * 60 * 60 * 1000 };
+const DEFAULTS = { WORD_COUNT: 5, HIGHLIGHT_COLOR: '#FFEB3B', FLASHCARD_MODE: 'word', AUDIO_TYPE: 'word' };
+const SHEET_COLUMNS = { WORD: 0, PRONUNCIATION: 1, POS: 2, TRANSLATION: 3, EXAMPLE: 4, URL: 5, TIMESTAMP: 6, REVIEW_COUNT: 7, AUDIO_US: 8, AUDIO_UK: 9 };
+const SHEET_HEADERS = { NEW_WORD: ['new word', 'từ', 'word', 'từ mới'], ENGLISH: ['word', 'từ'] };
+const API_ENDPOINTS = { DICTIONARY: 'https://dictionary-api.eliaschen.dev/api/dictionary/en', VOICERSS: 'https://api.voicerss.org/', GOOGLE_SHEETS: 'https://sheets.googleapis.com/v4/spreadsheets' };
+const ACTIONS = { GET_HIGHLIGHTED_WORDS: 'getHighlightedWords', DELETE_ALL_WORDS: 'deleteAllWords', FETCH_DICTIONARY: 'fetchDictionary', LOAD_WORDS_FROM_SHEET: 'loadWordsFromSheet', GET_RANDOM_WORDS_FOR_FLASHCARD: 'getRandomWordsForFlashcard', RELOAD_MP3_FOR_ALL_WORDS: 'reloadMP3ForAllWords', LOG_TO_SHEETS: 'logToSheets', MARK_WORD_REVIEWED: 'markWordReviewed', UPDATE_REVIEW_STATS: 'updateReviewStats', FETCH_AUDIO_AS_BLOB: 'fetchAudioAsBlob', PLAY_AUDIO: 'playAudio' };
+const ERROR_MESSAGES = { NO_SHEET_CONFIG: 'Vui lòng cấu hình Google Sheets trước!', NO_API_KEY: 'Vui lòng nhập VoiceRSS API Key trước!', NO_WORDS: 'Chưa có từ để học. Hãy highlight một số từ trước!', NO_AUDIO_WORDS: 'Không có từ nào có audio. Hãy highlight một số từ trước!', AUDIO_GENERATION_FAILED: 'Không thể tạo audio. Vui lòng thử lại sau.', AUDIO_PLAYBACK_FAILED: 'Không thể phát audio. Có thể do CORS hoặc URL không hợp lệ.', SHEET_SYNC_FAILED: 'Không thể đồng bộ với Google Sheets. Vui lòng kiểm tra kết nối.', DICTIONARY_FETCH_FAILED: 'Không thể lấy nghĩa từ. Vui lòng thử lại sau.', NETWORK_ERROR: 'Lỗi kết nối mạng. Vui lòng kiểm tra internet.', UNKNOWN_ERROR: 'Đã xảy ra lỗi không xác định. Vui lòng thử lại.' };
+
+// Logger utility (inline for service worker)
+const DEBUG = false;
+const logger = {
+  log: (...args) => DEBUG && console.log('[VocabMaster]', ...args),
+  warn: (...args) => DEBUG && console.warn('[VocabMaster]', ...args),
+  error: (...args) => console.error('[VocabMaster ERROR]', ...args),
+  info: (...args) => DEBUG && console.info('[VocabMaster]', ...args),
+  logWithContext: (context, ...args) => DEBUG && console.log(`[VocabMaster ${context}]`, ...args)
+};
+
 chrome.commands.onCommand.addListener((command) => {
   if (command === 'highlight-word') {
     chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
@@ -59,7 +84,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             url: currentUrl
           });
         } catch (error) {
-          console.error('Error logging delete all words from current URL to Google Sheets:', error);
+          logger.error('Error logging delete all words from current URL to Google Sheets:', error);
         }
       }
     });
@@ -84,7 +109,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             timestamp: new Date().toLocaleString()
           });
         } catch (error) {
-          console.error('Error deleting word from Google Sheets:', error);
+          logger.error('Error deleting word from Google Sheets:', error);
         }
       }
     });
@@ -164,7 +189,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               await logToGoogleSheetsDirectly(result.sheetUrl, result.sheetName, request.logData);
               sendResponse({success: true});
             } catch (error) {
-              console.error('Error logging to Google Sheets:', error);
+              logger.error('Error logging to Google Sheets:', error);
               
               sendResponse({
                 success: false, 
@@ -193,11 +218,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               
               if (request.knew) {
                 const currentInterval = word.reviewInterval || 1;
-                word.reviewInterval = Math.min(currentInterval * 2, 30);
-                word.nextReview = now + (word.reviewInterval * 24 * 60 * 60 * 1000);
+                word.reviewInterval = Math.min(currentInterval * SPACED_REPETITION.MULTIPLIER, SPACED_REPETITION.MAX_INTERVAL);
+                word.nextReview = now + (word.reviewInterval * SPACED_REPETITION.MILLISECONDS_PER_DAY);
               } else {
-                word.reviewInterval = 1;
-                word.nextReview = now + (24 * 60 * 60 * 1000);
+                word.reviewInterval = SPACED_REPETITION.INITIAL_INTERVAL;
+                word.nextReview = now + SPACED_REPETITION.MILLISECONDS_PER_DAY;
               }
               
               chrome.storage.local.set({highlightedWords: words});
@@ -285,7 +310,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     try {
                       await updateAudioInSheet(result.sheetUrl, result.sheetName, request.word, request.url, wordAudioUrlUS, wordAudioUrlUK);
                     } catch (err) {
-                      console.error('Error updating audio in Google Sheet:', err);
+                      logger.error('Error updating audio in Google Sheet:', err);
                     }
                   }
                 } else {
@@ -310,7 +335,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                   try {
                     await logToGoogleSheetsDirectly(result.sheetUrl, result.sheetName, sheetData);
                   } catch (err) {
-                    console.error('Error adding word to Google Sheet:', err);
+                    logger.error('Error adding word to Google Sheet:', err);
                   }
                 }
               }
@@ -399,7 +424,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               };
               reader.readAsDataURL(blob);
             } catch (error) {
-              console.error('Error fetching audio:', error);
+              logger.error('Error fetching audio:', error);
               sendResponse({success: false, error: error.message});
             }
           })();
@@ -458,7 +483,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                       try {
                         wordAudioUrlUS = await generateAudioUrl(word.word, voicerssApiKey);
                       } catch (error) {
-                        console.error('Error generating US audio with VoiceRSS:', error);
+                        logger.error('Error generating US audio with VoiceRSS:', error);
                       }
                     }
                     
@@ -467,7 +492,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                       try {
                         wordAudioUrlUK = await generateAudioUrl(word.word, voicerssApiKey);
                       } catch (error) {
-                        console.error('Error generating UK audio with VoiceRSS:', error);
+                        logger.error('Error generating UK audio with VoiceRSS:', error);
                       }
                     }
                     
@@ -478,14 +503,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         await updateAudioInSheet(sheetUrl, sheetName, word.word, word.url || '', wordAudioUrlUS, wordAudioUrlUK);
                         generated++;
                       } catch (error) {
-                        console.error('Error updating audio in sheet for word:', word.word, error);
+                        logger.error('Error updating audio in sheet for word:', word.word, error);
                       }
                     }
                     
                     // Small delay to avoid rate limiting
                     await new Promise(resolve => setTimeout(resolve, 100));
                   } catch (error) {
-                    console.error('Error processing word:', word.word, error);
+                    logger.error('Error processing word:', word.word, error);
                   }
                 }
               }
@@ -496,7 +521,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 generated: generated
               });
             } catch (error) {
-              console.error('Error in reloadMP3ForAllWords:', error);
+              logger.error('Error in reloadMP3ForAllWords:', error);
               sendResponse({
                 success: false,
                 error: error.message
@@ -514,11 +539,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             chrome.storage.local.get(['highlightedWords'], (result) => {
               const words = [...(result.highlightedWords || []), ...wordsFromSheet];
               const count = request.count || 5;
-              const mode = request.mode || 'word'; // 'word' or 'audio'
+              const mode = request.mode || FLASHCARD_MODES.WORD;
               
               // Filter words based on mode
               let filteredWords = words;
-              if (mode === 'audio') {
+              if (mode === FLASHCARD_MODES.AUDIO) {
                 // Only words with audio (US or UK) - check for non-empty strings
                 filteredWords = words.filter(w => {
                   const hasUSAudio = w.wordAudioUrlUS && w.wordAudioUrlUS.trim();
@@ -580,11 +605,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             try {
                               await updateAudioInSheet(result.sheetUrl, result.sheetName, word.word, word.url, wordAudioUrlUS, wordAudioUrlUK);
                             } catch (error) {
-                              console.error('Error updating audio in sheet:', error);
+                              logger.error('Error updating audio in sheet:', error);
                             }
                           }
                         } catch (error) {
-                          console.error('Error generating audio for word:', word.word, error);
+                          logger.error('Error generating audio for word:', word.word, error);
                         }
                       }
                     }
