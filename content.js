@@ -231,87 +231,191 @@ function showActionMenu(x, y, text, spanElement) {
     existingTooltip.remove();
   }
   
-  // Get position of spanElement (the highlighted word)
-  const rect = spanElement.getBoundingClientRect();
+  // Remove existing action popup
+  const existingPopup = document.getElementById('vocab-action-popup');
+  if (existingPopup) {
+    existingPopup.remove();
+  }
+  
+  // Get word meaning from storage
+  chrome.storage.local.get(['highlightedWords'], (result) => {
+    const words = result.highlightedWords || [];
+    const wordObj = words.find(w => 
+      w.word.toLowerCase() === text.toLowerCase() && 
+      w.url === window.location.href
+    );
+    
+    const meaning = wordObj?.translation || wordObj?.meaning || 'Chưa có nghĩa';
+    
+    // Get position of spanElement (the highlighted word)
+    const rect = spanElement.getBoundingClientRect();
+    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+    const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+    
+    const tooltip = document.createElement('div');
+    tooltip.id = 'vocab-tooltip';
+    tooltip.style.position = 'absolute';
+    tooltip.style.zIndex = '2147483647';
+    tooltip.innerHTML = `
+      <div style="
+        position: relative;
+        background: white;
+        border: none;
+        border-radius: 8px;
+        padding: 6px 10px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        max-width: 300px;
+        min-height: 32px;
+      ">
+        <div style="
+          font-size: 14px;
+          color: #333;
+          line-height: 1.4;
+          word-wrap: break-word;
+        ">${meaning}</div>
+      </div>
+    `;
+    
+    // Position tooltip above the word, aligned to the left of the word
+    const tooltipHeight = 40; // Approximate height of tooltip
+    tooltip.style.left = (rect.left + scrollLeft) + 'px';
+    tooltip.style.top = (rect.top + scrollTop - tooltipHeight - 5) + 'px';
+    tooltip.style.zIndex = '2147483647';
+    tooltip.style.pointerEvents = 'auto';
+    
+    document.body.appendChild(tooltip);
+    
+    // Remove tooltip when mouse leaves the span element
+    spanElement.addEventListener('mouseleave', () => {
+      // Small delay to allow moving mouse to tooltip
+      setTimeout(() => {
+        if (tooltip.parentNode) {
+          // Check if mouse is still over tooltip or popup
+          const popup = document.getElementById('vocab-action-popup');
+          if (!tooltip.matches(':hover') && (!popup || !popup.matches(':hover'))) {
+            tooltip.remove();
+            if (popup) popup.remove();
+          }
+        }
+      }, 100);
+    });
+    
+    // Keep tooltip visible when hovering over it
+    tooltip.addEventListener('mouseenter', () => {
+      // Tooltip stays visible
+    });
+    
+    tooltip.addEventListener('mouseleave', () => {
+      // Small delay before removing
+      setTimeout(() => {
+        const popup = document.getElementById('vocab-action-popup');
+        if (!popup || !popup.matches(':hover')) {
+          tooltip.remove();
+          if (popup) popup.remove();
+        }
+      }, 100);
+    });
+    
+    // Add click event to spanElement to show action popup
+    // Use a flag to prevent multiple listeners
+    if (!spanElement.hasAttribute('data-action-listener')) {
+      spanElement.setAttribute('data-action-listener', 'true');
+      const handleClick = (e) => {
+        e.stopPropagation();
+        // Check if popup already exists
+        const existingPopup = document.getElementById('vocab-action-popup');
+        if (existingPopup) {
+          existingPopup.remove();
+        } else {
+          showActionPopup(rect, text, spanElement, tooltip);
+        }
+      };
+      
+      spanElement.addEventListener('click', handleClick);
+    }
+  });
+}
+
+function showActionPopup(rect, text, spanElement, tooltip) {
+  // Remove existing popup
+  const existingPopup = document.getElementById('vocab-action-popup');
+  if (existingPopup) {
+    existingPopup.remove();
+  }
+  
   const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
   const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
   
-  const tooltip = document.createElement('div');
-  tooltip.id = 'vocab-tooltip';
-  tooltip.style.position = 'absolute';
-  tooltip.style.zIndex = '2147483647';
-  tooltip.innerHTML = `
-          <div style="
-            position: relative;
-            background: white;
-            border: none;
-            border-radius: 8px;
-            padding: 6px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-            display: flex;
-            gap: 4px;
-            align-items: center;
-            min-width: 60px;
-            min-height: 30px;
-          ">
-            <button id="highlightBtn" style="
-              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-              border: none;
-              cursor: pointer;
-              padding: 3px;
-              border-radius: 3px;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              width: 20px;
-              height: 20px;
-              transition: all 0.2s ease;
-              box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
-            " title="Đổi màu">
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5">
-                <circle cx="12" cy="12" r="3"/>
-                <path d="M12 1v6m0 6v6m11-7h-6m-6 0H1"/>
-              </svg>
-            </button>
-            
-            <button id="deleteBtn" style="
-              background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
-              border: none;
-              cursor: pointer;
-              padding: 3px;
-              border-radius: 3px;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              width: 20px;
-              height: 20px;
-              transition: all 0.2s ease;
-              box-shadow: 0 2px 8px rgba(255, 107, 107, 0.3);
-            " title="Xóa highlight">
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5">
-                <polyline points="3,6 5,6 21,6"/>
-                <path d="M19,6v14a2,2 0 0,1 -2,2H7a2,2 0 0,1 -2,-2V6m3,0V4a2,2 0 0,1 2,-2h4a2,2 0 0,1 2,2v2"/>
-                <line x1="10" y1="11" x2="10" y2="17"/>
-                <line x1="14" y1="11" x2="14" y2="17"/>
-              </svg>
-            </button>
-          </div>
-        `;
+  const popup = document.createElement('div');
+  popup.id = 'vocab-action-popup';
+  popup.style.position = 'absolute';
+  popup.style.zIndex = '2147483648';
+  popup.innerHTML = `
+    <div style="
+      position: relative;
+      background: white;
+      border: none;
+      border-radius: 8px;
+      padding: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      min-width: 80px;
+    ">
+      <button id="highlightBtn" style="
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border: none;
+        cursor: pointer;
+        padding: 6px;
+        border-radius: 4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        transition: all 0.2s ease;
+        box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+        color: white;
+      " title="Đổi màu">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M12 1v6m0 6v6m11-7h-6m-6 0H1"/>
+        </svg>
+      </button>
+      
+      <button id="deleteBtn" style="
+        background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
+        border: none;
+        cursor: pointer;
+        padding: 6px;
+        border-radius: 4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        transition: all 0.2s ease;
+        box-shadow: 0 2px 8px rgba(255, 107, 107, 0.3);
+        color: white;
+      " title="Xóa highlight">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polyline points="3,6 5,6 21,6"/>
+          <path d="M19,6v14a2,2 0 0,1 -2,2H7a2,2 0 0,1 -2,-2V6m3,0V4a2,2 0 0,1 2,-2h4a2,2 0 0,1 2,2v2"/>
+          <line x1="10" y1="11" x2="10" y2="17"/>
+          <line x1="14" y1="11" x2="14" y2="17"/>
+        </svg>
+      </button>
+    </div>
+  `;
   
-  // Position tooltip above the word, centered horizontally
-  const tooltipWidth = 80; // Approximate width of tooltip
-  const tooltipHeight = 40; // Approximate height of tooltip
-  tooltip.style.left = (rect.left + scrollLeft + (rect.width / 2) - (tooltipWidth / 2)) + 'px';
-  tooltip.style.top = (rect.top + scrollTop - tooltipHeight - 5) + 'px';
-  tooltip.style.zIndex = '2147483647';
-  tooltip.style.pointerEvents = 'auto';
-  tooltip.style.backgroundColor = 'white';
-  tooltip.style.border = 'none';
-  tooltip.style.borderRadius = '8px';
-  tooltip.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
-  tooltip.style.display = 'block';
+  // Position popup below the tooltip
+  const popupWidth = 150;
+  const popupHeight = 40;
+  popup.style.left = (rect.left + scrollLeft + (rect.width / 2) - (popupWidth / 2)) + 'px';
+  popup.style.top = (rect.top + scrollTop - 60) + 'px'; // Position below tooltip
   
-  document.body.appendChild(tooltip);
+  document.body.appendChild(popup);
   
   // Add event listeners
   const highlightBtn = document.getElementById('highlightBtn');
@@ -321,12 +425,11 @@ function showActionMenu(x, y, text, spanElement) {
   [highlightBtn, deleteBtn].forEach(btn => {
     btn.addEventListener('mouseenter', () => {
       btn.style.transform = 'scale(1.05)';
-      btn.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2)';
+      btn.style.opacity = '0.9';
     });
     btn.addEventListener('mouseleave', () => {
       btn.style.transform = 'scale(1)';
-      btn.style.boxShadow = btn.id === 'highlightBtn' ? '0 2px 8px rgba(102, 126, 234, 0.3)' :
-                           '0 2px 8px rgba(255, 107, 107, 0.3)';
+      btn.style.opacity = '1';
     });
   });
   
@@ -336,7 +439,8 @@ function showActionMenu(x, y, text, spanElement) {
     const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
     const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
     showColorPicker(rect.left + scrollLeft + (rect.width / 2), rect.top + scrollTop, text, spanElement);
-    tooltip.remove();
+    if (tooltip && tooltip.parentNode) tooltip.remove();
+    if (popup && popup.parentNode) popup.remove();
   });
   
   deleteBtn.addEventListener('click', (e) => {
@@ -354,15 +458,18 @@ function showActionMenu(x, y, text, spanElement) {
     } catch (error) {
       console.error('Error in delete button click:', error);
     }
-    tooltip.remove();
+    if (tooltip && tooltip.parentNode) tooltip.remove();
+    if (popup && popup.parentNode) popup.remove();
   });
   
-  // Remove tooltip when clicking outside
-  document.addEventListener('click', () => {
-    if (tooltip.parentNode) {
-      tooltip.remove();
+  // Remove popup when clicking outside
+  const handleOutsideClick = (e) => {
+    if (popup.parentNode && !popup.contains(e.target) && (!tooltip || !tooltip.contains(e.target)) && !spanElement.contains(e.target)) {
+      popup.remove();
+      document.removeEventListener('click', handleOutsideClick);
     }
-  }, { once: true });
+  };
+  document.addEventListener('click', handleOutsideClick);
 }
 
 function showColorPicker(x, y, text, spanElement) {
@@ -381,24 +488,24 @@ function showColorPicker(x, y, text, spanElement) {
             position: absolute;
             background: white;
             border: 1px solid #e0e0e0;
-            border-radius: 16px;
-            padding: 16px;
+            border-radius: 8px;
+            padding: 6px;
             z-index: 10001;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
             display: flex;
-            gap: 12px;
+            gap: 6px;
             align-items: center;
           ">
             ${colors.map(color => `
               <button class="color-option" data-color="${color}" style="
-                width: 32px;
-                height: 32px;
+                width: 28px;
+                height: 28px;
                 border-radius: 50%;
-                border: 3px solid ${color === highlightColor ? '#4CAF50' : 'transparent'};
+                border: 2px solid ${color === highlightColor ? '#4CAF50' : 'transparent'};
                 background-color: ${color};
                 cursor: pointer;
                 transition: all 0.3s ease;
-                box-shadow: ${color === highlightColor ? '0 4px 12px rgba(76, 175, 80, 0.4)' : '0 2px 8px rgba(0,0,0,0.1)'};
+                box-shadow: ${color === highlightColor ? '0 2px 6px rgba(76, 175, 80, 0.4)' : '0 1px 4px rgba(0,0,0,0.1)'};
                 transform: ${color === highlightColor ? 'scale(1.1)' : 'scale(1)'};
               " title="Màu ${color}"></button>
             `).join('')}

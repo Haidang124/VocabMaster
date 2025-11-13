@@ -1759,11 +1759,17 @@ function reloadWordsFromSheet() {
         const existingWord = wordMap.get(key);
         
         if (existingWord) {
-          // Update existing word with Sheet data
-          if (word.translation) existingWord.translation = word.translation;
-          if (word.pronunciation) existingWord.pronunciation = word.pronunciation;
-          if (word.pos) existingWord.pos = word.pos;
-          if (word.example) existingWord.example = word.example;
+          // Update existing word with Sheet data (Sheet data takes priority)
+          // Always update these fields from Sheet, even if empty (to override old values)
+          existingWord.translation = word.translation || '';
+          existingWord.pronunciation = word.pronunciation || '';
+          existingWord.pos = word.pos || '';
+          existingWord.example = word.example || '';
+          existingWord.meaning = word.meaning || ''; // Update meaning field too
+          existingWord.wordAudioUrlUS = word.wordAudioUrlUS || ''; // Update audio URLs
+          existingWord.wordAudioUrlUK = word.wordAudioUrlUK || '';
+          
+          // Update domPath only if Sheet has it (don't overwrite with empty)
           if (word.domPath) existingWord.domPath = word.domPath;
           if (word.startOffset != null) existingWord.startOffset = word.startOffset;
           if (word.endOffset != null) existingWord.endOffset = word.endOffset;
