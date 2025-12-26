@@ -245,7 +245,17 @@ function showActionMenu(x, y, text, spanElement) {
       w.url === window.location.href
     );
     
-    const meaning = wordObj?.translation || wordObj?.meaning || 'Chưa có nghĩa';
+    const getActualMeaning = (meaningText) => {
+      if (!meaningText || !meaningText.trim()) return null;
+      const text = meaningText.trim();
+      const textWithoutPrefix = text
+        .replace(/^\[[^\]]+\]\s*/, '')
+        .replace(/^\/[^\/]+\/\s*/, '')
+        .trim();
+      return (textWithoutPrefix.length > 0 || text.includes('|') || text.includes('(')) ? text : null;
+    };
+    
+    const meaning = wordObj?.translation?.trim() || getActualMeaning(wordObj?.meaning) || 'Chưa có nghĩa';
     
     // Get position of spanElement (the highlighted word)
     const rect = spanElement.getBoundingClientRect();
@@ -265,6 +275,8 @@ function showActionMenu(x, y, text, spanElement) {
         padding: 6px 10px;
         box-shadow: 0 4px 12px rgba(0,0,0,0.3);
         max-width: 300px;
+        max-height: 400px;
+        overflow-y: auto;
         min-height: 32px;
       ">
         <div style="

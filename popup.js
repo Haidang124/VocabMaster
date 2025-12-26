@@ -495,10 +495,12 @@ function initializeControls() {
             }
             
             // Lưu cấu hình vào storage
+            // Đánh dấu rằng user đã cấu hình sheetUrl (để không bị reset về mặc định)
             chrome.storage.local.set({
               sheetUrl: sheetUrl,
               sheetName: selectedSheetName,
-              selectedSheetId: sheetId
+              selectedSheetId: sheetId,
+              sheetUrlConfigured: true // Flag để đánh dấu đã được user cấu hình
             }, () => {
               showNotification('Đã lưu cấu hình Google Sheets!');
             });
@@ -2388,7 +2390,7 @@ function loadDefaultSettingsFromFile() {
 
 // Initialize default settings only if not already set in storage
 function initializeDefaultSettingsIfNeeded() {
-  chrome.storage.local.get(['shortcutSettings', 'highlightColor', 'wordCount', 'wordFilterMode', 'sheetUrl', 'sheetName', 'selectedSheetId'], (result) => {
+  chrome.storage.local.get(['shortcutSettings', 'highlightColor', 'wordCount', 'wordFilterMode', 'sheetUrl', 'sheetName', 'selectedSheetId', 'voicerssApiKey', 'sheetUrlConfigured'], (result) => {
     // Check if settings already exist
     const hasSettings = result.shortcutSettings && result.highlightColor && result.wordCount !== undefined;
     
@@ -2398,6 +2400,7 @@ function initializeDefaultSettingsIfNeeded() {
         .then(response => response.json())
         .then(fileSettings => {
           // Set default settings from file only if not already set
+          // IMPORTANT: Never override sheetUrl, sheetName if they are already configured by user
           const settingsToSet = {};
           if (!result.shortcutSettings) {
             settingsToSet.shortcutSettings = fileSettings.shortcutSettings;
@@ -2411,16 +2414,18 @@ function initializeDefaultSettingsIfNeeded() {
           if (!result.wordFilterMode) {
             settingsToSet.wordFilterMode = fileSettings.wordFilterMode || 'current';
           }
-          if (!result.sheetUrl) {
+          // Only set sheetUrl if it's truly empty/undefined AND user hasn't configured it before
+          // Never override if sheetUrlConfigured flag is true
+          if (!result.sheetUrlConfigured && (!result.sheetUrl || result.sheetUrl.trim() === '')) {
             settingsToSet.sheetUrl = fileSettings.sheetUrl || 'https://docs.google.com/spreadsheets/d/1LTnXrNzm-MM6a5ElqhwUqNa70wsOVNJI2Wr7zGwZwb0/edit';
           }
-          if (!result.sheetName) {
+          if (!result.sheetUrlConfigured && (!result.sheetName || result.sheetName.trim() === '')) {
             settingsToSet.sheetName = fileSettings.sheetName || '';
           }
-          if (!result.selectedSheetId) {
+          if (!result.sheetUrlConfigured && (!result.selectedSheetId || result.selectedSheetId.trim() === '')) {
             settingsToSet.selectedSheetId = fileSettings.selectedSheetId || '';
           }
-          if (!result.voicerssApiKey) {
+          if (!result.voicerssApiKey || result.voicerssApiKey.trim() === '') {
             settingsToSet.voicerssApiKey = fileSettings.voicerssApiKey || '';
           }
           
@@ -2438,6 +2443,7 @@ function initializeDefaultSettingsIfNeeded() {
         })
         .catch(error => {
           // If file doesn't exist, use hardcoded defaults only for missing settings
+          // IMPORTANT: Never override sheetUrl, sheetName if they are already configured by user
           const settingsToSet = {};
           if (!result.shortcutSettings) {
             settingsToSet.shortcutSettings = {modifier: 'alt', key: 'f'};
@@ -2451,16 +2457,18 @@ function initializeDefaultSettingsIfNeeded() {
           if (!result.wordFilterMode) {
             settingsToSet.wordFilterMode = 'current';
           }
-          if (!result.sheetUrl) {
+          // Only set sheetUrl if it's truly empty/undefined AND user hasn't configured it before
+          // Never override if sheetUrlConfigured flag is true
+          if (!result.sheetUrlConfigured && (!result.sheetUrl || result.sheetUrl.trim() === '')) {
             settingsToSet.sheetUrl = 'https://docs.google.com/spreadsheets/d/1LTnXrNzm-MM6a5ElqhwUqNa70wsOVNJI2Wr7zGwZwb0/edit';
           }
-          if (!result.sheetName) {
+          if (!result.sheetUrlConfigured && (!result.sheetName || result.sheetName.trim() === '')) {
             settingsToSet.sheetName = '';
           }
-          if (!result.selectedSheetId) {
+          if (!result.sheetUrlConfigured && (!result.selectedSheetId || result.selectedSheetId.trim() === '')) {
             settingsToSet.selectedSheetId = '';
           }
-          if (!result.voicerssApiKey) {
+          if (!result.voicerssApiKey || result.voicerssApiKey.trim() === '') {
             settingsToSet.voicerssApiKey = '';
           }
           

@@ -118,9 +118,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   
         if (request.action === 'getRandomWords') {
           (async () => {
+            // Load words from sheet (current configured sheet)
             const wordsFromSheet = await loadWordsFromSheet();
-            chrome.storage.local.get(['highlightedWords'], (result) => {
-              const words = [...(result.highlightedWords || []), ...wordsFromSheet];
+            chrome.storage.local.get(['highlightedWords', 'sheetUrl', 'sheetName'], (result) => {
+              // Get current sheet URL to filter words
+              const currentSheetUrl = result.sheetUrl || '';
+              
+              // For review, prioritize words from current sheet
+              // Only include highlightedWords that are NOT from a different sheet
+              let words = [...wordsFromSheet];
+              
+              // Also include highlighted words that are NOT from sheet (manually highlighted on pages)
+              // These don't have fromSheet flag or have different sheet URL
+              if (result.highlightedWords) {
+                const manualWords = result.highlightedWords.filter(w => {
+                  // Include if not from sheet, or if from current sheet (will be handled by wordsFromSheet)
+                  return !w.fromSheet || (w.sheetUrl === currentSheetUrl);
+                });
+                words = [...words, ...manualWords];
+              }
+              
               const count = request.count || 5;
               const randomWords = getRandomWordsForReview(words, count);
               sendResponse({words: randomWords});
@@ -533,11 +550,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         
         if (request.action === 'getRandomWordsForFlashcard') {
           (async () => {
-            // Load words from sheet
+            // Load words from sheet (current configured sheet)
             const wordsFromSheet = await loadWordsFromSheet();
             
-            chrome.storage.local.get(['highlightedWords'], (result) => {
-              const words = [...(result.highlightedWords || []), ...wordsFromSheet];
+            chrome.storage.local.get(['highlightedWords', 'sheetUrl', 'sheetName'], (result) => {
+              // Get current sheet URL to filter words
+              const currentSheetUrl = result.sheetUrl || '';
+              
+              // For flashcard, prioritize words from current sheet
+              // Only include highlightedWords that are NOT from a different sheet
+              // (words from current sheet will be in wordsFromSheet, so we avoid duplicates)
+              let words = [...wordsFromSheet];
+              
+              // Also include highlighted words that are NOT from sheet (manually highlighted on pages)
+              // These don't have fromSheet flag or have different sheet URL
+              if (result.highlightedWords) {
+                const manualWords = result.highlightedWords.filter(w => {
+                  // Include if not from sheet, or if from current sheet (will be handled by wordsFromSheet)
+                  return !w.fromSheet || (w.sheetUrl === currentSheetUrl);
+                });
+                words = [...words, ...manualWords];
+              }
+              
               const count = request.count || 5;
               const mode = request.mode || FLASHCARD_MODES.WORD;
               
@@ -1511,6 +1545,8 @@ async function loadWordsFromSheet() {
         wordAudioUrlUK: wordAudioUrlUK || '',
         // exampleAudioUrl sẽ được generate từ example text khi cần
         fromSheet: true,
+        sheetUrl: result.sheetUrl || '', // Mark which sheet this word came from
+        sheetName: result.sheetName || '',
         firstHighlighted: Date.now(),
         lastHighlighted: Date.now(),
         count: 1
@@ -1631,20 +1667,30 @@ async function fetchDictionaryDefinition(word) {
       }
     }
     
-    let displayMeaning = meaning;
-    if (translation && translation.trim()) {
-      displayMeaning += ` | ${translation.trim()}`;
-    }
-    if (example) {
-      displayMeaning += ` (VD: ${example})`;
+    let displayMeaning = '';
+    if (meaning && meaning.trim()) {
+      displayMeaning = meaning.trim();
+      if (translation && translation.trim()) {
+        displayMeaning += ` | ${translation.trim()}`;
+      }
+      if (example) {
+        displayMeaning += ` (VD: ${example})`;
+      }
+    } else if (translation && translation.trim()) {
+      displayMeaning = translation.trim();
+      if (example) {
+        displayMeaning += ` (VD: ${example})`;
+      }
     }
     
     let prefix = '';
     if (pos) prefix = `[${pos}] `;
     if (pronunciation) prefix = `${prefix}${pronunciation} `;
     
+    const finalMeaning = displayMeaning ? (prefix + displayMeaning) : '';
+    
     return {
-      meaning: prefix + displayMeaning,
+      meaning: finalMeaning,
       pronunciation: pronunciation,
       pos: pos,
       translation: translation.trim(),
